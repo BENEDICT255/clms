@@ -1,29 +1,61 @@
-import { Plus } from 'lucide-react';
-import { PageHeader, DataTable, Column, FinancialValue, StatusBadge, Button } from '@/design-system';
+// ==============================================================================
+// CLMS Certificates Page
+// ==============================================================================
 
-interface CertificateItem {
-  id: string;
-  certificateNumber: string;
-  certType: 'FAC' | 'PAC' | 'DPC';
-  poNumber: string;
-  siteCount: number;
-  totalAmount: number;
-  status: string;
-  createdAt: string;
-}
+import { useState, useEffect, useCallback } from 'react';
+import { Plus, RefreshCw } from 'lucide-react';
+import { PageHeader, DataTable, Column, FinancialValue, StatusBadge, Button } from '@/design-system';
+import {
+  certificateRepository,
+  CertificateRecord,
+} from '@/infrastructure/repositories/CertificateRepository';
+import { CreateCertificationWizard } from './CreateCertificationWizard';
+import { CertificatePreviewModal } from './CertificatePreviewModal';
+import { useAuth } from '@/app/providers/AuthContext';
 
 export function CertificatesPage() {
-  const certificates: CertificateItem[] = [];
+  const { can, user } = useAuth();
+  const [certificates, setCertificates] = useState<CertificateRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [selectedCert, setSelectedCert] = useState<CertificateRecord | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  const columns: Column<CertificateItem>[] = [
+  const isSupplier = Boolean(user?.supplierId);
+
+  const fetchCertificates = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await certificateRepository.listCertificates({
+        supplierId: user?.supplierId ?? undefined,
+      });
+      setCertificates(data);
+    } catch (err) {
+      console.error('Failed to load certificates:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.supplierId]);
+
+  useEffect(() => {
+    fetchCertificates();
+  }, [fetchCertificates]);
+
+  const handleRowClick = (cert: CertificateRecord) => {
+    setSelectedCert(cert);
+    setIsPreviewOpen(true);
+  };
+
+  const columns: Column<CertificateRecord>[] = [
     { header: 'Certificate No', accessorKey: 'certificateNumber', width: '160px' },
     { header: 'Type', accessorKey: 'certType', width: '90px' },
     { header: 'Purchase Order', accessorKey: 'poNumber', width: '140px' },
-    { header: 'Sites', accessorKey: 'siteCount', align: 'center', width: '90px' },
+    { header: 'Supplier', accessorKey: 'supplierName' },
+    { header: 'Sites', accessorKey: 'siteCount', align: 'center', width: '80px' },
     {
-      header: 'Total Value (TZS)',
+      header: 'Certified Value',
       align: 'right',
-      cell: (row) => <FinancialValue amount={row.totalAmount} currency="TZS" size="sm" />,
+      cell: (row) => <FinancialValue amount={row.currentCertifiedAmount} currency={row.currency} size="sm" />,
     },
     {
       header: 'Status',
@@ -31,33 +63,83 @@ export function CertificatesPage() {
       width: '140px',
       cell: (row) => <StatusBadge status={row.status} size="sm" />,
     },
-    { header: 'Created At', accessorKey: 'createdAt', width: '130px' },
+    {
+      header: 'Created At',
+      accessorKey: 'createdAt',
+      width: '120px',
+      cell: (row) => new Date(row.createdAt).toLocaleDateString(),
+    },
   ];
 
   return (
     <div className="clms-certificates-page">
       <PageHeader
         title="Site Acceptance Certificates"
-        description="Author, review, and issue FAC, PAC, and DPC milestone certificates."
+        description="Author, review, approve, and issue FAC, PAC, and DPC milestone certificates."
         breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Certificates' }]}
         actions={
-          <Button
-            variant="primary"
-            size="md"
-            icon={<Plus size={16} />}
-            onClick={() => alert('Certificate authoring workflow will be enabled in Super Prompt 3.')}
-          >
-            Create Certification
-          </Button>
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            <Button
+              variant="secondary"
+              size="md"
+              icon={<RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />}
+              onClick={fetchCertificates}
+            >
+              Refresh
+            </Button>
+            {!isSupplier && can('certificate.create') && (
+              <Button
+                variant="primary"
+                size="md"
+                icon={<Plus size={16} />}
+                onClick={() => setIsWizardOpen(true)}
+              >
+                Create Certification
+              </Button>
+            )}
+          </div>
         }
       />
 
-      <DataTable
-        columns={columns}
-        data={certificates}
-        emptyTitle="No certificates yet"
-        emptyDescription="Create a certification from an approved Purchase Order to initiate the site acceptance and signoff workflow."
-      />
+      <div style={{ cursor: 'pointer' }}>
+        <DataTable
+          columns={columns}
+          data={certificates}
+          isLoading={isLoading}
+          onRowClick={handleRowClick}
+          emptyTitle="No certificates yet"
+          emptyDescription="Create a certification from an approved Purchase Order to initiate the site acceptance and signoff workflow."
+        />
+      </div>
+
+      {isWizardOpen && (
+        <CreateCertificationWizard
+          isOpen={isWizardOpen}
+          onClose={() => setIsWizardOpen(false)}
+          onSuccess={() => {
+            setIsWizardOpen(false);
+            fetchCertificates();
+          }}
+        />
+      )}
+
+      {isPreviewOpen && selectedCert && (
+        <CertificatePreviewModal
+          isOpen={isPreviewOpen}
+          onClose={() => {
+            setIsPreviewOpen(false);
+            setSelectedCert(null);
+          }}
+          certificate={selectedCert}
+          onUpdate={() => {
+            fetchCertificates();
+            // Refresh selected cert
+            certificateRepository.getCertificateById(selectedCert.id).then((c) => {
+              if (c) setSelectedCert(c);
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

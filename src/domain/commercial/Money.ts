@@ -14,22 +14,40 @@ export class Money {
   /**
    * Creates a Money instance from standard major units (e.g. 10.50 TZS -> 1050 minor units).
    */
-  public static fromMajor(amount: number | string, currency: CurrencyCode = 'TZS'): Money {
+  public static fromMajor(amount: number | string, currency: CurrencyCode | string = 'TZS'): Money {
+    const validCurrency: CurrencyCode = (currency?.toUpperCase() === 'USD') ? 'USD' : 'TZS';
     const numericAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
     if (isNaN(numericAmount)) {
       throw new FinancialInvariantError(`Invalid monetary amount: ${amount}`);
     }
     // Minor units factor: 100 for 2 decimal places
     const minor = BigInt(Math.round(numericAmount * 100));
-    return new Money(minor, currency);
+    return new Money(minor, validCurrency);
   }
 
-  public static zero(currency: CurrencyCode = 'TZS'): Money {
-    return new Money(0n, currency);
+  public static from(amount: number | string, currency: CurrencyCode | string = 'TZS'): Money {
+    return Money.fromMajor(amount, currency);
+  }
+
+  public static fromNumber(amount: number, currency: CurrencyCode | string = 'TZS'): Money {
+    return Money.fromMajor(amount, currency);
+  }
+
+  public static zero(currency: CurrencyCode | string = 'TZS'): Money {
+    const validCurrency: CurrencyCode = (currency?.toUpperCase() === 'USD') ? 'USD' : 'TZS';
+    return new Money(0n, validCurrency);
   }
 
   public get majorAmount(): number {
     return Number(this.amountInMinorUnits) / 100;
+  }
+
+  public getAmount(): number {
+    return this.majorAmount;
+  }
+
+  public toCentNumber(): number {
+    return this.majorAmount;
   }
 
   public add(other: Money): Money {

@@ -1,31 +1,50 @@
-import { Plus } from 'lucide-react';
-import { PageHeader, Button, DataTable, Column, StatusBadge } from '@/design-system';
-
-interface CommercialPackageItem {
-  id: string;
-  packageRef: string;
-  projectName: string;
-  poNumber: string;
-  supplierName: string;
-  status: string;
-  createdAt: string;
-}
+import { useState, useEffect } from 'react';
+import { Plus, X } from 'lucide-react';
+import { PageHeader, Button, DataTable, Column, StatusBadge, FinancialValue } from '@/design-system';
+import { commercialPackageRepository } from '@/infrastructure/repositories/CommercialPackageRepository';
+import { CommercialPackageRecord } from '@/domain/commercial/types';
+import { ImportPackageWizard } from './ImportPackageWizard';
 
 export function CommercialPackagesPage() {
-  const packages: CommercialPackageItem[] = [];
+  const [packages, setPackages] = useState<CommercialPackageRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
 
-  const columns: Column<CommercialPackageItem>[] = [
+  const loadPackages = async () => {
+    setIsLoading(true);
+    try {
+      const items = await commercialPackageRepository.listPackages();
+      setPackages(items);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPackages();
+  }, []);
+
+  const columns: Column<CommercialPackageRecord>[] = [
     { header: 'Package Ref', accessorKey: 'packageRef', width: '140px' },
     { header: 'Project', accessorKey: 'projectName' },
-    { header: 'PO Number', accessorKey: 'poNumber', width: '150px' },
+    { header: 'Purchase Order', accessorKey: 'poNumber', width: '150px' },
     { header: 'Supplier', accessorKey: 'supplierName' },
+    {
+      header: 'Authorized Amount',
+      align: 'right',
+      cell: (row) => <FinancialValue amount={row.authorizedAmount || 0} currency={row.currency || 'TZS'} size="sm" />,
+    },
     {
       header: 'Status',
       align: 'center',
       width: '130px',
       cell: (row) => <StatusBadge status={row.status} size="sm" />,
     },
-    { header: 'Ingested Date', accessorKey: 'createdAt', width: '130px' },
+    {
+      header: 'Ingested Date',
+      width: '130px',
+      cell: (row) => new Date(row.createdAt).toLocaleDateString(),
+    },
   ];
 
   return (
@@ -36,22 +55,34 @@ export function CommercialPackagesPage() {
         breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Commercial Packages' }]}
         actions={
           <Button
-            variant="primary"
+            variant={isWizardOpen ? 'secondary' : 'primary'}
             size="md"
-            icon={<Plus size={16} />}
-            onClick={() => alert('Commercial Package Ingestion workflow will be enabled in Super Prompt 3.')}
+            icon={isWizardOpen ? <X size={16} /> : <Plus size={16} />}
+            onClick={() => setIsWizardOpen(!isWizardOpen)}
           >
-            Import Commercial Package
+            {isWizardOpen ? 'Close Ingestion' : 'Import Commercial Package'}
           </Button>
         }
       />
 
+      {isWizardOpen && (
+        <ImportPackageWizard
+          onSuccess={(_id) => {
+            setIsWizardOpen(false);
+            loadPackages();
+          }}
+          onCancel={() => setIsWizardOpen(false)}
+        />
+      )}
+
       <DataTable
         columns={columns}
         data={packages}
+        isLoading={isLoading}
         emptyTitle="No commercial packages yet"
         emptyDescription="Import your first approved Bill of Quantities (BOQ) and Purchase Order (PO) to establish digital commercial commitments."
       />
     </div>
   );
 }
+

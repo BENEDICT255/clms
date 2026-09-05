@@ -1,0 +1,131 @@
+/* ==========================================================================
+   CLMS Import Package Wizard Styles
+   ========================================================================== */
+
+.clms-wizard {
+  background-color: var(--color-surface-card);
+  border-radius: var(--radius-sm);
+  padding: var(--space-6);
+  margin-bottom: var(--space-8);
+}
+
+.clms-wizard__stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-8);
+  padding-bottom: var(--space-6);
+}
+
+.clms-wizard__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.clms-wizard__step--active {
+  color: var(--color-brand-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.clms-wizard__step--completed {
+  color: var(--color-semantic-success-text);
+}
+
+.clms-wizard__step-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xs);
+  background-color: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+}
+
+.clms-wizard__step--active .clms-wizard__step-badge {
+  background-color: var(--color-brand-primary);
+  color: #ffffff;
+}
+
+.clms-wizard__step--completed .clms-wizard__step-badge {
+  background-color: var(--color-semantic-success-surface);
+  color: var(--color-semantic-success-text);
+}
+
+.clms-wizard__divider {
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-border-hairline);
+  margin: 0 var(--space-4);
+}
+
+.clms-wizard__content {
+  margin-bottom: var(--space-6);
+}
+
+.clms-wizard__dropzones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  margin-top: var(--space-4);
+}
+
+@media (max-width: 768px) {
+  .clms-wizard__dropzones {
+    grid-template-columns: 1fr;
+  }
+}
+
+.clms-wizard__dropzone {
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: var(--radius-xs);
+  padding: var(--space-6);
+  text-align: center;
+  background-color: var(--color-surface-sunken);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+  cursor: pointer;
+}
+
+.clms-wizard__dropzone:hover {
+  border-color: var(--color-brand-primary);
+}
+
+.clms-wizard__dropzone-icon {
+  margin-bottom: var(--space-2);
+  color: var(--color-brand-primary);
+}
+
+.clms-wizard__dropzone-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-1);
+}
+
+.clms-wizard__dropzone-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.clms-wizard__file-pill {
+  margin-top: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-surface-card);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.clms-wizard__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+}
