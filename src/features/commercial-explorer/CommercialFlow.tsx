@@ -16,18 +16,21 @@ interface CommercialFlowNode {
   amount: number;
   currency: string;
   status: string;
+  date?: string | undefined;
 }
 
 interface CommercialFlowProps {
   poNumber: string;
   authorizedAmount: number;
   currency: string;
-  certificateRef?: string;
-  certifiedAmount?: number;
-  invoiceRef?: string;
-  invoicedAmount?: number;
-  paymentRef?: string;
-  paidAmount?: number;
+  certificateRef?: string | undefined;
+  certifiedAmount?: number | undefined;
+  invoiceRef?: string | undefined;
+  invoicedAmount?: number | undefined;
+  paymentRef?: string | undefined;
+  paidAmount?: number | undefined;
+  paymentDate?: string | undefined;
+  paymentStatus?: string | undefined;
 }
 
 export function CommercialFlow({
@@ -40,6 +43,8 @@ export function CommercialFlow({
   invoicedAmount,
   paymentRef,
   paidAmount,
+  paymentDate,
+  paymentStatus,
 }: CommercialFlowProps) {
   const nodes: CommercialFlowNode[] = [
     {
@@ -69,10 +74,11 @@ export function CommercialFlow({
     {
       type: 'PAYMENT',
       title: 'Payment Settlement',
-      reference: paymentRef || 'Awaiting Settlement',
+      reference: paymentRef || (paidAmount && paidAmount > 0 ? 'Disbursed' : 'Awaiting Settlement'),
       amount: paidAmount || 0,
       currency,
-      status: paidAmount ? 'SETTLED' : 'UNCOMMENCED',
+      status: paymentStatus || (paidAmount && paidAmount >= (invoicedAmount || 1) ? 'SETTLED' : paidAmount && paidAmount > 0 ? 'PARTIALLY_PAID' : 'UNCOMMENCED'),
+      date: paymentDate,
     },
   ];
 
@@ -102,6 +108,11 @@ export function CommercialFlow({
             </div>
             <div className="clms-flow-node__ref">{node.reference}</div>
             <FinancialValue amount={node.amount} currency={node.currency} size="sm" className="clms-flow-node__amount" />
+            {node.date && (
+              <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>
+                {node.date}
+              </div>
+            )}
           </div>
 
           {index < nodes.length - 1 && (

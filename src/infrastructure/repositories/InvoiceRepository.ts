@@ -16,7 +16,7 @@ export interface InvoiceRecord {
   poNumber: string;
   supplierId: string;
   supplierName: string;
-  projectName?: string;
+  projectName?: string | undefined;
   currency: string;
   amount: number;
   taxAmount: number;
@@ -24,13 +24,15 @@ export interface InvoiceRecord {
   status: InvoiceStatus;
   submittedAt?: string | undefined;
   createdAt: string;
+  returnCode?: string | undefined;
+  returnReason?: string | undefined;
   supportingDocuments?: Array<{
     id: string;
     fileName: string;
     fileSize: number;
     docType: string;
     storagePath: string;
-  }>;
+  }> | undefined;
 }
 
 export class InvoiceRepository {
@@ -269,6 +271,68 @@ export class InvoiceRepository {
       return { success: true };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error submitting invoice';
+      return { success: false, error: msg };
+    }
+  }
+
+  public async resubmitInvoice(input: {
+    invoiceId: string;
+    supplierId: string;
+    supplierInvoiceNo: string;
+    invoiceDate: string;
+    notes?: string | undefined;
+  }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const { data, error } = await supabase.rpc('resubmit_supplier_invoice', {
+        p_invoice_id: input.invoiceId,
+        p_supplier_id: input.supplierId,
+        p_supplier_invoice_no: input.supplierInvoiceNo,
+        p_invoice_date: input.invoiceDate,
+        p_notes: input.notes ?? null,
+        p_submitted_by: user?.id ?? null,
+      });
+
+      if (!error && data && data.success) {
+        return { success: true };
+      }
+
+      if (error && !error.message.includes('does not exist')) {
+        return { success: false, error: error.message };
+      }
+
+      // Fallback
+      const now = new Date().toISOString();
+      const { error: updateErr } = await supabase
+        .from('invoices')
+        .update({
+          supplier_invoice_number: input.supplierInvoiceNo,
+          invoice_date: input.invoiceDate,
+          status: 'RESUBMITTED',
+          submitted_at: now,
+          updated_at: now,
+        })
+        .eq('id', input.invoiceId);
+
+      if (updateErr) return { success: false, error: updateErr.message };
+
+      await auditRepository.recordEvent({
+        action: 'INVOICE_RESUBMITTED',
+        entityType: 'INVOICE',
+        entityId: input.invoiceId,
+        metadata: {
+          supplierInvoiceNo: input.supplierInvoiceNo,
+          invoiceDate: input.invoiceDate,
+          resubmittedAt: now,
+        },
+      });
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error resubmitting invoice';
       return { success: false, error: msg };
     }
   }

@@ -139,11 +139,20 @@ npm run test:e2e
 
 ---
 
-## 7. Implementation Roadmap & Phase Status
+## 7. Documentation Index
+
+- [UAT_PLAN.md](file:///c:/Users/surface%20laptop/Downloads/CLMSS/docs/UAT_PLAN.md) — Comprehensive User Acceptance Testing strategy, test personas, golden path, return workflow, and sign-off criteria.
+- [RELEASE_CHECKLIST.md](file:///c:/Users/surface%20laptop/Downloads/CLMSS/docs/RELEASE_CHECKLIST.md) — Operational release quality gates, security review, and deployment verification.
+- [PRODUCTION_DEPLOYMENT.md](file:///c:/Users/surface%20laptop/Downloads/CLMSS/docs/PRODUCTION_DEPLOYMENT.md) — Architecture-neutral deployment runbook, Microsoft Entra ID migration plan, and database backup runbooks.
+
+---
+
+## 8. Implementation Roadmap & Phase Status
 
 | Phase | Description | Status |
-|:---|:---|:---|
+|:---|:---|:---:|
 | **Super Prompt 1** | Constitution (PRODUCT.md, DESIGN.md, ARCHITECTURE.md, AGENTS.md) | **Complete** |
 | **Super Prompt 2** | Platform Foundation (Design system, Auth, RLS, Storage, App Shell) | **Complete** |
-| **Super Prompt 3** | Commercial Core (BOQ/PO Ingestion, Certification, Supplier Portal) | *Pending* |
-| **Super Prompt 4** | Control & Settlement (Supply Chain, Finance Ledger, Aging, Hardening) | *Pending* |
+| **Super Prompt 3** | Commercial Core (BOQ/PO Ingestion, Certification, Invoicing) | **Complete** |
+| **Super Prompt 4** | Control & Settlement (Supply Chain, Finance Ledger, Aging, UAT Readiness) | **Complete (UAT-Ready)** |
+

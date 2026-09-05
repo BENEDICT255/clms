@@ -9,9 +9,14 @@
 
 export type InvoiceStatus =
   | 'DRAFT'
-  | 'SUBMITTED' // AWAITING_SUPPLY_CHAIN_REVIEW
+  | 'SUBMITTED' // Awaiting Supply Chain Review
+  | 'RETURNED'
+  | 'RESUBMITTED'
   | 'SC_APPROVED'
   | 'SC_RETURNED'
+  | 'UNDER_FINANCE_REVIEW'
+  | 'APPROVED_FOR_PAYMENT'
+  | 'PARTIALLY_PAID'
   | 'FINANCE_APPROVED'
   | 'SETTLED'
   | 'VOID';
@@ -71,10 +76,15 @@ export class InvoiceEngine {
   public static canTransition(currentStatus: InvoiceStatus, targetStatus: InvoiceStatus): boolean {
     const validTransitions: Record<InvoiceStatus, InvoiceStatus[]> = {
       DRAFT: ['SUBMITTED', 'VOID'],
-      SUBMITTED: ['SC_APPROVED', 'SC_RETURNED', 'VOID'],
-      SC_APPROVED: ['FINANCE_APPROVED', 'SC_RETURNED', 'VOID'],
-      SC_RETURNED: ['DRAFT', 'VOID'],
-      FINANCE_APPROVED: ['SETTLED', 'VOID'],
+      SUBMITTED: ['SC_APPROVED', 'RETURNED', 'SC_RETURNED', 'VOID'],
+      RETURNED: ['RESUBMITTED', 'DRAFT', 'VOID'],
+      RESUBMITTED: ['SC_APPROVED', 'RETURNED', 'SC_RETURNED', 'VOID'],
+      SC_APPROVED: ['UNDER_FINANCE_REVIEW', 'APPROVED_FOR_PAYMENT', 'PARTIALLY_PAID', 'FINANCE_APPROVED', 'SETTLED', 'RETURNED', 'VOID'],
+      SC_RETURNED: ['RESUBMITTED', 'DRAFT', 'VOID'],
+      UNDER_FINANCE_REVIEW: ['APPROVED_FOR_PAYMENT', 'PARTIALLY_PAID', 'SETTLED', 'VOID'],
+      APPROVED_FOR_PAYMENT: ['PARTIALLY_PAID', 'SETTLED', 'VOID'],
+      PARTIALLY_PAID: ['PARTIALLY_PAID', 'SETTLED', 'VOID'],
+      FINANCE_APPROVED: ['SETTLED', 'PARTIALLY_PAID', 'VOID'],
       SETTLED: [],
       VOID: [],
     };

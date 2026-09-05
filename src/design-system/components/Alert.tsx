@@ -8,6 +8,7 @@ export interface AlertProps {
   children: React.ReactNode;
   onClose?: () => void;
   className?: string;
+  style?: React.CSSProperties | undefined;
 }
 
 export function Alert({
@@ -16,6 +17,7 @@ export function Alert({
   children,
   onClose,
   className = '',
+  style,
 }: AlertProps) {
   const iconMap = {
     info: <Info size={16} aria-hidden="true" />,
@@ -25,7 +27,7 @@ export function Alert({
   };
 
   return (
-    <div className={`clms-alert clms-alert--${type} ${className}`} role="alert">
+    <div className={`clms-alert clms-alert--${type} ${className}`} style={style} role="alert">
       <div className="clms-alert__icon">{iconMap[type]}</div>
       <div className="clms-alert__content">
         {title && <div className="clms-alert__title">{title}</div>}

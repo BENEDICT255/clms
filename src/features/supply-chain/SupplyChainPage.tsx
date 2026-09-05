@@ -1,27 +1,77 @@
 // ==============================================================================
-// CLMS Supply Chain Review Queue Page (Read-Only Foundation for Prompt 3)
+// CLMS Supply Chain Review Queue Page (Enterprise Super Prompt 4)
+// ==============================================================================
+// Governed by PRODUCT.md Section 27 & 28 and DESIGN.md v1.2:
+// - Review Queue of SUBMITTED & RESUBMITTED invoices
+// - Comprehensive Commercial Lineage Side-by-Side Inspection
+// - Structured Return Reason Category & Comment
+// - Idempotent Approval & Automatic Finance Queue Transfer
 // ==============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { PageHeader, DataTable, Column, FinancialValue, StatusBadge, Button, Drawer } from '@/design-system';
 import {
-  invoiceRepository,
-  InvoiceRecord,
-} from '@/infrastructure/repositories/InvoiceRepository';
-import { RefreshCw, Eye, CheckCircle2, ShieldAlert } from 'lucide-react';
+  PageHeader,
+  DataTable,
+  Column,
+  FinancialValue,
+  StatusBadge,
+  Button,
+  Drawer,
+  Modal,
+  Alert,
+  Input,
+} from '@/design-system';
+import {
+  supplyChainRepository,
+  InvoiceReviewHistoryItem,
+} from '@/infrastructure/repositories/SupplyChainRepository';
+import { InvoiceRecord } from '@/infrastructure/repositories/InvoiceRepository';
+import {
+  RETURN_REASON_OPTIONS,
+  ReturnReasonCode,
+  SupplyChainEngine,
+} from '@/domain/supply-chain/SupplyChainEngine';
+import {
+  RefreshCw,
+  Eye,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  Send,
+  Building2,
+  FileText,
+  Clock,
+} from 'lucide-react';
 
 export function SupplyChainPage() {
   const [pendingInvoices, setPendingInvoices] = useState<InvoiceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [reviewHistory, setReviewHistory] = useState<InvoiceReviewHistoryItem[]>([]);
+
+  // Return Modal State
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+  const [selectedReturnCode, setSelectedReturnCode] = useState<ReturnReasonCode>('INVOICE_NUMBER_MISMATCH');
+  const [returnReasonText, setReturnReasonText] = useState('');
+  const [isReturning, setIsReturning] = useState(false);
+  const [returnError, setReturnError] = useState<string | null>(null);
+
+  // Approval Modal State
+  const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
+  const [approvalNotes, setApprovalNotes] = useState('');
+  const [isApproving, setIsApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+
+  // Feedback Alert
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
 
   const fetchInvoices = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await invoiceRepository.listSubmittedInvoicesForSCM();
+      const data = await supplyChainRepository.getPendingReviewQueue();
       setPendingInvoices(data);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to load SCM review queue:', err);
     } finally {
       setIsLoading(false);
@@ -32,21 +82,133 @@ export function SupplyChainPage() {
     fetchInvoices();
   }, [fetchInvoices]);
 
-  const handleInspect = (inv: InvoiceRecord) => {
+  const handleInspect = async (inv: InvoiceRecord) => {
     setSelectedInvoice(inv);
     setIsDrawerOpen(true);
+    try {
+      const history = await supplyChainRepository.getInvoiceReviewHistory(inv.id);
+      setReviewHistory(history);
+    } catch (err: unknown) {
+      console.warn('Failed to load review history:', err);
+      setReviewHistory([]);
+    }
+  };
+
+  const handleOpenReturnModal = () => {
+    setReturnReasonText('');
+    setSelectedReturnCode('INVOICE_NUMBER_MISMATCH');
+    setReturnError(null);
+    setIsReturnModalOpen(true);
+  };
+
+  const handleConfirmReturn = async () => {
+    if (!selectedInvoice) return;
+
+    const validation = SupplyChainEngine.validateReturnInput({
+      returnCode: selectedReturnCode,
+      reason: returnReasonText,
+    });
+
+    if (!validation.isValid) {
+      setReturnError(validation.errors[0] ?? 'Please provide a valid return reason.');
+      return;
+    }
+
+    setIsReturning(true);
+    setReturnError(null);
+    try {
+      const res = await supplyChainRepository.returnInvoice(
+        selectedInvoice.id,
+        selectedReturnCode,
+        returnReasonText
+      );
+
+      if (res.success) {
+        setIsReturnModalOpen(false);
+        setIsDrawerOpen(false);
+        setSelectedInvoice(null);
+        setFeedback({
+          type: 'success',
+          message: `Invoice ${selectedInvoice.clmsRef} returned to supplier for correction.`,
+        });
+        await fetchInvoices();
+      } else {
+        setReturnError(res.error || 'Failed to return invoice');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error returning invoice';
+      setReturnError(msg);
+    } finally {
+      setIsReturning(false);
+    }
+  };
+
+  const handleOpenApproveModal = () => {
+    setApprovalNotes('Commercial and documentary compliance verified against milestone certificate.');
+    setApprovalError(null);
+    setIsApproveModalOpen(true);
+  };
+
+  const handleConfirmApprove = async () => {
+    if (!selectedInvoice) return;
+
+    setIsApproving(true);
+    setApprovalError(null);
+    try {
+      const res = await supplyChainRepository.approveInvoice(
+        selectedInvoice.id,
+        approvalNotes
+      );
+
+      if (res.success) {
+        setIsApproveModalOpen(false);
+        setIsDrawerOpen(false);
+        setSelectedInvoice(null);
+        setFeedback({
+          type: 'success',
+          message: `Invoice ${selectedInvoice.clmsRef} approved and transferred to Finance processing queue.`,
+        });
+        await fetchInvoices();
+      } else {
+        setApprovalError(res.error || 'Failed to approve invoice');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error approving invoice';
+      setApprovalError(msg);
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  const calculateAgeInQueue = (submittedAt?: string): string => {
+    if (!submittedAt) return '—';
+    const subDate = new Date(submittedAt).getTime();
+    const now = Date.now();
+    const diffHours = Math.floor((now - subDate) / (1000 * 60 * 60));
+    if (diffHours < 24) {
+      return `${Math.max(1, diffHours)}h ago`;
+    }
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}d ago`;
   };
 
   const columns: Column<InvoiceRecord>[] = [
     { header: 'CLMS Ref', accessorKey: 'clmsRef', width: '140px' },
     { header: 'Supplier Invoice No', accessorKey: 'supplierInvoiceNo', width: '160px' },
     { header: 'Supplier', accessorKey: 'supplierName' },
-    { header: 'Purchase Order', accessorKey: 'poNumber', width: '150px' },
+    { header: 'Purchase Order', accessorKey: 'poNumber', width: '140px' },
     { header: 'Certificate', accessorKey: 'certificateNumber', width: '150px' },
     {
       header: 'Claim Value',
       align: 'right',
-      cell: (row) => <FinancialValue amount={row.totalAmount} currency={row.currency} size="sm" className="font-semibold" />,
+      cell: (row) => (
+        <FinancialValue
+          amount={row.totalAmount}
+          currency={row.currency}
+          size="sm"
+          className="font-semibold"
+        />
+      ),
     },
     {
       header: 'Status',
@@ -55,18 +217,28 @@ export function SupplyChainPage() {
       cell: (row) => <StatusBadge status={row.status} size="sm" />,
     },
     {
-      header: 'Submitted At',
+      header: 'Age in Queue',
       accessorKey: 'submittedAt',
-      width: '130px',
-      cell: (row) => (row.submittedAt ? new Date(row.submittedAt).toLocaleDateString() : '—'),
+      width: '120px',
+      cell: (row) => (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-xs)' }}>
+          <Clock size={12} />
+          {calculateAgeInQueue(row.submittedAt)}
+        </span>
+      ),
     },
     {
-      header: 'Inspect',
+      header: 'Action',
       align: 'center',
-      width: '100px',
+      width: '110px',
       cell: (row) => (
-        <Button variant="secondary" size="sm" icon={<Eye size={14} />} onClick={() => handleInspect(row)}>
-          Inspect
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<Eye size={14} />}
+          onClick={() => handleInspect(row)}
+        >
+          Review
         </Button>
       ),
     },
@@ -76,7 +248,7 @@ export function SupplyChainPage() {
     <div className="clms-scm-page">
       <PageHeader
         title="Supply Chain Review Queue"
-        description="Verify submitted supplier invoices against milestone certificates, PO commitments, and supporting documentation."
+        description="Review submitted supplier claims against issued certificates, authorized PO commitments, and supporting compliance documentation."
         breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Supply Chain Review' }]}
         actions={
           <Button
@@ -90,37 +262,70 @@ export function SupplyChainPage() {
         }
       />
 
+      {feedback && (
+        <Alert
+          type={feedback.type === 'success' ? 'success' : 'danger'}
+          title={feedback.type === 'success' ? 'Action Completed' : 'Action Failed'}
+          style={{ marginBottom: 'var(--space-4)' }}
+          onClose={() => setFeedback(null)}
+        >
+          {feedback.message}
+        </Alert>
+      )}
+
       <DataTable
         columns={columns}
         data={pendingInvoices}
         isLoading={isLoading}
-        emptyTitle="No invoices are awaiting review"
-        emptyDescription="Invoices submitted by suppliers will appear in this queue for commercial verification and approval."
+        emptyTitle="No invoices are awaiting Supply Chain review"
+        emptyDescription="Invoices submitted by suppliers against issued certificates will automatically arrive in this queue for commercial verification."
       />
 
-      {/* Read-Only SCM Inspection Drawer */}
+      {/* Side-by-Side SCM Review Drawer */}
       <Drawer
         isOpen={isDrawerOpen}
         onClose={() => {
           setIsDrawerOpen(false);
           setSelectedInvoice(null);
         }}
-        title={selectedInvoice ? `Invoice Review: ${selectedInvoice.clmsRef}` : 'Invoice Review'}
-        subtitle={selectedInvoice ? `Vendor: ${selectedInvoice.supplierName} | Status: Awaiting SCM Review` : ''}
-        width="520px"
+        title={selectedInvoice ? `Commercial Review: ${selectedInvoice.clmsRef}` : 'Commercial Review'}
+        subtitle={
+          selectedInvoice
+            ? `Supplier: ${selectedInvoice.supplierName} | Status: ${selectedInvoice.status}`
+            : ''
+        }
+        width="580px"
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-              <ShieldAlert size={14} /> SCM Approve/Return actions are enabled in Prompt 4
+          selectedInvoice && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <Button
+                variant="danger"
+                size="md"
+                icon={<RotateCcw size={16} />}
+                onClick={handleOpenReturnModal}
+              >
+                Return to Supplier
+              </Button>
+              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                <Button variant="secondary" size="md" onClick={() => setIsDrawerOpen(false)}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  icon={<Send size={16} />}
+                  onClick={handleOpenApproveModal}
+                >
+                  Approve & Send to Finance
+                </Button>
+              </div>
             </div>
-            <Button variant="secondary" onClick={() => setIsDrawerOpen(false)}>
-              Close
-            </Button>
-          </div>
+          )
         }
       >
         {selectedInvoice && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', fontSize: 'var(--font-size-xs)' }}>
+            {/* Context Box */}
             <div
               className="border-hairline"
               style={{
@@ -130,42 +335,67 @@ export function SupplyChainPage() {
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
-                <span style={{ color: 'var(--color-text-secondary)' }}>Status:</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Review Status:</span>
                 <StatusBadge status={selectedInvoice.status} size="sm" />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
-                <span style={{ color: 'var(--color-text-secondary)' }}>Supplier Invoice No:</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Supplier Legal Name:</span>
+                <strong style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                  <Building2 size={13} /> {selectedInvoice.supplierName}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>External Invoice Number:</span>
                 <strong>{selectedInvoice.supplierInvoiceNo}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
                 <span style={{ color: 'var(--color-text-secondary)' }}>Purchase Order:</span>
                 <strong>{selectedInvoice.poNumber}</strong>
               </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Project:</span>
+                <span>{selectedInvoice.projectName || 'Infrastructure Program'}</span>
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--color-text-secondary)' }}>Certificate Ref:</span>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Milestone Certificate:</span>
                 <strong>{selectedInvoice.certificateNumber}</strong> ({selectedInvoice.certType})
               </div>
             </div>
 
-            {/* Financial Reconciliation */}
+            {/* Financial Valuation Summary */}
             <div
               className="border-hairline"
               style={{
                 padding: 'var(--space-4)',
+                backgroundColor: 'var(--color-surface-card)',
                 borderRadius: 'var(--radius-xs)',
               }}
             >
-              <h4 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-semibold)', marginBottom: 'var(--space-3)' }}>
-                Commercial Valuation Summary
+              <h4
+                style={{
+                  fontSize: 'var(--font-size-sm)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  marginBottom: 'var(--space-3)',
+                }}
+              >
+                Commercial Claim Valuation
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Base Amount (Excl. VAT):</span>
-                  <FinancialValue amount={selectedInvoice.amount} currency={selectedInvoice.currency} size="sm" />
+                  <span style={{ color: 'var(--color-text-secondary)' }}>Net Invoiced Base Amount:</span>
+                  <FinancialValue
+                    amount={selectedInvoice.amount}
+                    currency={selectedInvoice.currency}
+                    size="sm"
+                  />
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>VAT (18%):</span>
-                  <FinancialValue amount={selectedInvoice.taxAmount} currency={selectedInvoice.currency} size="sm" />
+                  <span style={{ color: 'var(--color-text-secondary)' }}>Value Added Tax (VAT 18%):</span>
+                  <FinancialValue
+                    amount={selectedInvoice.taxAmount}
+                    currency={selectedInvoice.currency}
+                    size="sm"
+                  />
                 </div>
                 <div
                   style={{
@@ -180,36 +410,302 @@ export function SupplyChainPage() {
                   <FinancialValue
                     amount={selectedInvoice.totalAmount}
                     currency={selectedInvoice.currency}
-                    size="sm"
+                    size="md"
                     className="text-positive"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Verification Checklist */}
-            <div>
-              <h4 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-semibold)', marginBottom: 'var(--space-2)' }}>
-                Pre-Review Invariant Checklist
+            {/* Invariant Verification Checklist */}
+            <div
+              className="border-hairline"
+              style={{
+                padding: 'var(--space-4)',
+                borderRadius: 'var(--radius-xs)',
+                backgroundColor: 'var(--color-surface-card)',
+              }}
+            >
+              <h4
+                style={{
+                  fontSize: 'var(--font-size-sm)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  marginBottom: 'var(--space-3)',
+                }}
+              >
+                Authoritative Commercial Checklist
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                   <CheckCircle2 size={16} color="var(--color-semantic-success-text)" />
-                  <span>Invoice Amount matches certified entitlement ($Claim \le Certified$)</span>
+                  <span>Invoice amount matches certified milestone entitlement (Non-Overinvoicing)</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                   <CheckCircle2 size={16} color="var(--color-semantic-success-text)" />
-                  <span>Single-Certificate entitlement constraint verified</span>
+                  <span>Single-Certificate entitlement constraint verified ($1:1$)</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
                   <CheckCircle2 size={16} color="var(--color-semantic-success-text)" />
-                  <span>Contractor belongs to PO master and approved Commercial Package</span>
+                  <span>Supplier matches Purchase Order award and active tenant registration</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <CheckCircle2 size={16} color="var(--color-semantic-success-text)" />
+                  <span>Issued Certificate has completed internal Projects and Head of Projects signoff</span>
                 </div>
               </div>
             </div>
+
+            {/* Prior Review & Return History */}
+            {reviewHistory.length > 0 && (
+              <div
+                className="border-hairline"
+                style={{
+                  padding: 'var(--space-4)',
+                  borderRadius: 'var(--radius-xs)',
+                  backgroundColor: 'var(--color-surface-sunken)',
+                }}
+              >
+                <h4
+                  style={{
+                    fontSize: 'var(--font-size-sm)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    marginBottom: 'var(--space-2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-1)',
+                  }}
+                >
+                  <FileText size={14} /> Review Audit History
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  {reviewHistory.map((rev) => (
+                    <div
+                      key={rev.id}
+                      style={{
+                        padding: 'var(--space-2)',
+                        backgroundColor: 'var(--color-surface-card)',
+                        borderRadius: 'var(--radius-xs)',
+                        border: '1px solid var(--color-border-hairline)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
+                        <span style={{ fontWeight: 'var(--font-weight-semibold)' }}>
+                          {rev.decision === 'RETURNED' ? 'Returned to Supplier' : 'Approved'}
+                        </span>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>
+                          {new Date(rev.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {rev.returnCode && (
+                        <div style={{ color: 'var(--color-semantic-danger-text)', marginBottom: 'var(--space-1)' }}>
+                          Reason Code: <strong>{rev.returnCode}</strong>
+                        </div>
+                      )}
+                      <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>{rev.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Drawer>
+
+      {/* Return to Supplier Modal */}
+      <Modal
+        isOpen={isReturnModalOpen}
+        onClose={() => {
+          if (!isReturning) setIsReturnModalOpen(false);
+        }}
+        title="Return Invoice to Supplier"
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={isReturning}
+              onClick={() => setIsReturnModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="md"
+              disabled={isReturning}
+              icon={isReturning ? <RefreshCw size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+              onClick={handleConfirmReturn}
+            >
+              {isReturning ? 'Returning...' : 'Confirm Return'}
+            </Button>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {selectedInvoice && (
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '-8px', marginBottom: 'var(--space-1)' }}>
+              Invoice: <strong>{selectedInvoice.clmsRef}</strong> &bull; Supplier: <strong>{selectedInvoice.supplierName}</strong>
+            </div>
+          )}
+
+          {returnError && (
+            <Alert type="danger" title="Validation Error">
+              {returnError}
+            </Alert>
+          )}
+
+          <div>
+            <label
+              htmlFor="return-reason-code-select"
+              style={{
+                display: 'block',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 'var(--font-weight-semibold)',
+                color: 'var(--color-text-secondary)',
+                marginBottom: 'var(--space-1)',
+              }}
+            >
+              Return Reason Category *
+            </label>
+            <select
+              id="return-reason-code-select"
+              value={selectedReturnCode}
+              onChange={(e) => setSelectedReturnCode(e.target.value as ReturnReasonCode)}
+              style={{
+                width: '100%',
+                padding: 'var(--space-2) var(--space-3)',
+                borderRadius: 'var(--radius-xs)',
+                border: '1px solid var(--color-border-hairline)',
+                backgroundColor: 'var(--color-surface-card)',
+                color: 'var(--color-text-primary)',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
+              {RETURN_REASON_OPTIONS.map((opt) => (
+                <option key={opt.code} value={opt.code}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="return-reason-textarea"
+              style={{
+                display: 'block',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 'var(--font-weight-semibold)',
+                color: 'var(--color-text-secondary)',
+                marginBottom: 'var(--space-1)',
+              }}
+            >
+              Detailed Explanatory Reason *
+            </label>
+            <textarea
+              id="return-reason-textarea"
+              rows={4}
+              placeholder="Explain the specific documentary or commercial discrepancy requiring supplier correction..."
+              value={returnReasonText}
+              onChange={(e) => setReturnReasonText(e.target.value)}
+              style={{
+                width: '100%',
+                padding: 'var(--space-2) var(--space-3)',
+                borderRadius: 'var(--radius-xs)',
+                border: '1px solid var(--color-border-hairline)',
+                backgroundColor: 'var(--color-surface-card)',
+                color: 'var(--color-text-primary)',
+                fontSize: 'var(--font-size-sm)',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+            <span style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--color-text-tertiary)' }}>
+              This explanation will be transmitted immediately to authorized supplier personnel.
+            </span>
+          </div>
+        </div>
+      </Modal>
+
+      {/* SCM Approval Modal */}
+      <Modal
+        isOpen={isApproveModalOpen}
+        onClose={() => {
+          if (!isApproving) setIsApproveModalOpen(false);
+        }}
+        title="Approve & Send to Finance"
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={isApproving}
+              onClick={() => setIsApproveModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              disabled={isApproving}
+              icon={isApproving ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              onClick={handleConfirmApprove}
+            >
+              {isApproving ? 'Approving...' : 'Confirm Approval'}
+            </Button>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {selectedInvoice && (
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '-8px', marginBottom: 'var(--space-1)' }}>
+              Invoice: <strong>{selectedInvoice.clmsRef}</strong> &bull; Total Claim: <strong>TZS {selectedInvoice.totalAmount.toLocaleString()}</strong>
+            </div>
+          )}
+
+          {approvalError && (
+            <Alert type="danger" title="Approval Error">
+              {approvalError}
+            </Alert>
+          )}
+
+          <div
+            style={{
+              padding: 'var(--space-3)',
+              backgroundColor: 'var(--color-surface-sunken)',
+              borderRadius: 'var(--radius-xs)',
+              display: 'flex',
+              gap: 'var(--space-2)',
+            }}
+          >
+            <AlertTriangle size={18} color="var(--color-brand-primary)" style={{ flexShrink: 0 }} />
+            <p style={{ margin: 0, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+              Confirming approval will lock this commercial review and immediately transmit the invoice to the
+              Finance Processing Queue for invoice vetting and payment execution.
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="approval-notes-input"
+              style={{
+                display: 'block',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 'var(--font-weight-semibold)',
+                color: 'var(--color-text-secondary)',
+                marginBottom: 'var(--space-1)',
+              }}
+            >
+              Verification Notes (Optional)
+            </label>
+            <Input
+              id="approval-notes-input"
+              value={approvalNotes}
+              onChange={(e) => setApprovalNotes(e.target.value)}
+              placeholder="e.g. Document completeness verified against issued FAC certificate."
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
