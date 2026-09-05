@@ -331,13 +331,13 @@ $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public;
 -- ==============================================================================
 
 -- Helper: Retrieve bound supplier_id for current authenticated user
-CREATE OR REPLACE FUNCTION auth.get_user_supplier_id()
+CREATE OR REPLACE FUNCTION public.get_user_supplier_id()
 RETURNS UUID AS $$
     SELECT supplier_id FROM public.users WHERE id = auth.uid() AND is_active = true;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth;
 
 -- Helper: Check if current authenticated user has a specific capability
-CREATE OR REPLACE FUNCTION auth.has_capability(p_cap_code TEXT)
+CREATE OR REPLACE FUNCTION public.has_capability(p_cap_code TEXT)
 RETURNS BOOLEAN AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.user_role_assignments ura
@@ -351,13 +351,17 @@ RETURNS BOOLEAN AS $$
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth;
 
 -- Helper: Check if current user is an internal staff member (not a supplier user)
-CREATE OR REPLACE FUNCTION auth.is_internal_staff()
+CREATE OR REPLACE FUNCTION public.is_internal_staff()
 RETURNS BOOLEAN AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.users
         WHERE id = auth.uid() AND is_active = true AND supplier_id IS NULL
     );
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth;
+
+GRANT EXECUTE ON FUNCTION public.get_user_supplier_id() TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.has_capability(TEXT) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.is_internal_staff() TO authenticated, anon;
 
 -- Enable RLS on ALL tables
 ALTER TABLE public.roles ENABLE ROW LEVEL SECURITY;
@@ -397,14 +401,14 @@ CREATE POLICY role_capabilities_read ON public.role_capabilities FOR SELECT TO a
 
 -- Suppliers: Internal staff see all; Suppliers see only their own organization
 CREATE POLICY suppliers_read ON public.suppliers FOR SELECT TO authenticated
-USING (auth.is_internal_staff() OR id = auth.get_user_supplier_id());
+USING (public.is_internal_staff() OR id = public.get_user_supplier_id());
 
 -- Users: Users see themselves and colleagues in the same tenant or internal staff
 CREATE POLICY users_read ON public.users FOR SELECT TO authenticated
-USING (auth.is_internal_staff() OR id = auth.uid() OR supplier_id = auth.get_user_supplier_id());
+USING (public.is_internal_staff() OR id = auth.uid() OR supplier_id = public.get_user_supplier_id());
 
 CREATE POLICY user_role_assignments_read ON public.user_role_assignments FOR SELECT TO authenticated
-USING (auth.is_internal_staff() OR user_id = auth.uid());
+USING (public.is_internal_staff() OR user_id = auth.uid());
 
 -- Projects & Project Types: Read-only to authenticated users
 CREATE POLICY project_types_read ON public.project_types FOR SELECT TO authenticated USING (true);
@@ -412,75 +416,75 @@ CREATE POLICY projects_read ON public.projects FOR SELECT TO authenticated USING
 
 -- Commercial Packages & BOQs: Internal staff access; Suppliers cannot read raw commercial packages
 CREATE POLICY packages_internal_read ON public.commercial_packages FOR SELECT TO authenticated
-USING (auth.is_internal_staff());
+USING (public.is_internal_staff());
 
 CREATE POLICY boqs_internal_read ON public.boqs FOR SELECT TO authenticated
-USING (auth.is_internal_staff());
+USING (public.is_internal_staff());
 
 -- Purchase Orders: Internal staff see all; Suppliers see only POs awarded to them
 CREATE POLICY po_read ON public.purchase_orders FOR SELECT TO authenticated
-USING (auth.is_internal_staff() OR supplier_id = auth.get_user_supplier_id());
+USING (public.is_internal_staff() OR supplier_id = public.get_user_supplier_id());
 
 -- Sites & PO Sites: Internal staff see all; Suppliers see sites under their POs
 CREATE POLICY sites_read ON public.sites FOR SELECT TO authenticated
 USING (
-    auth.is_internal_staff()
+    public.is_internal_staff()
     OR id IN (
         SELECT ps.site_id FROM public.po_sites ps
         JOIN public.purchase_orders po ON po.id = ps.po_id
-        WHERE po.supplier_id = auth.get_user_supplier_id()
+        WHERE po.supplier_id = public.get_user_supplier_id()
     )
 );
 
 CREATE POLICY po_sites_read ON public.po_sites FOR SELECT TO authenticated
 USING (
-    auth.is_internal_staff()
+    public.is_internal_staff()
     OR po_id IN (
         SELECT id FROM public.purchase_orders
-        WHERE supplier_id = auth.get_user_supplier_id()
+        WHERE supplier_id = public.get_user_supplier_id()
     )
 );
 
 -- Certificates: Internal staff see all; Suppliers see only ISSUED certificates for their POs
 CREATE POLICY certificates_read ON public.certificates FOR SELECT TO authenticated
 USING (
-    auth.is_internal_staff()
+    public.is_internal_staff()
     OR (
         status = 'ISSUED'
         AND po_id IN (
             SELECT id FROM public.purchase_orders
-            WHERE supplier_id = auth.get_user_supplier_id()
+            WHERE supplier_id = public.get_user_supplier_id()
         )
     )
 );
 
 CREATE POLICY cert_allocations_read ON public.certificate_site_allocations FOR SELECT TO authenticated
 USING (
-    auth.is_internal_staff()
+    public.is_internal_staff()
     OR certificate_id IN (
         SELECT c.id FROM public.certificates c
         JOIN public.purchase_orders po ON po.id = c.po_id
-        WHERE c.status = 'ISSUED' AND po.supplier_id = auth.get_user_supplier_id()
+        WHERE c.status = 'ISSUED' AND po.supplier_id = public.get_user_supplier_id()
     )
 );
 
 CREATE POLICY cert_approvals_read ON public.certificate_approvals FOR SELECT TO authenticated
-USING (auth.is_internal_staff());
+USING (public.is_internal_staff());
 
 -- Invoices: Strictly isolated by supplier_id for suppliers; SCM and Finance see submitted invoices
 CREATE POLICY invoices_select ON public.invoices FOR SELECT TO authenticated
 USING (
-    (auth.get_user_supplier_id() IS NOT NULL AND supplier_id = auth.get_user_supplier_id())
-    OR (auth.is_internal_staff() AND auth.has_capability('invoice.review.sc'))
-    OR (auth.is_internal_staff() AND auth.has_capability('finance.process'))
-    OR (auth.is_internal_staff() AND auth.has_capability('report.view.executive'))
+    (public.get_user_supplier_id() IS NOT NULL AND supplier_id = public.get_user_supplier_id())
+    OR (public.is_internal_staff() AND public.has_capability('invoice.review.sc'))
+    OR (public.is_internal_staff() AND public.has_capability('finance.process'))
+    OR (public.is_internal_staff() AND public.has_capability('report.view.executive'))
 );
 
 CREATE POLICY invoices_supplier_insert ON public.invoices FOR INSERT TO authenticated
 WITH CHECK (
-    auth.get_user_supplier_id() IS NOT NULL
-    AND supplier_id = auth.get_user_supplier_id()
-    AND auth.has_capability('invoice.create')
+    public.get_user_supplier_id() IS NOT NULL
+    AND supplier_id = public.get_user_supplier_id()
+    AND public.has_capability('invoice.create')
 );
 
 CREATE POLICY invoice_allocations_read ON public.invoice_allocations FOR SELECT TO authenticated
@@ -496,29 +500,29 @@ USING (
 -- Payment Transactions: Suppliers see payments on their invoices; Finance sees all
 CREATE POLICY payments_read ON public.payment_transactions FOR SELECT TO authenticated
 USING (
-    auth.has_capability('finance.process')
-    OR auth.has_capability('report.view.executive')
+    public.has_capability('finance.process')
+    OR public.has_capability('report.view.executive')
     OR invoice_id IN (
         SELECT id FROM public.invoices
-        WHERE supplier_id = auth.get_user_supplier_id()
+        WHERE supplier_id = public.get_user_supplier_id()
     )
 );
 
 -- Commercial Documents: Access controlled by ownership and authorization
 CREATE POLICY documents_read ON public.commercial_documents FOR SELECT TO authenticated
 USING (
-    auth.is_internal_staff()
+    public.is_internal_staff()
     OR uploaded_by = auth.uid()
     OR (
         entity_type = 'INVOICE' AND entity_id IN (
-            SELECT id FROM public.invoices WHERE supplier_id = auth.get_user_supplier_id()
+            SELECT id FROM public.invoices WHERE supplier_id = public.get_user_supplier_id()
         )
     )
     OR (
         entity_type = 'CERTIFICATE' AND entity_id IN (
             SELECT c.id FROM public.certificates c
             JOIN public.purchase_orders po ON po.id = c.po_id
-            WHERE c.status = 'ISSUED' AND po.supplier_id = auth.get_user_supplier_id()
+            WHERE c.status = 'ISSUED' AND po.supplier_id = public.get_user_supplier_id()
         )
     )
 );
@@ -533,7 +537,7 @@ WITH CHECK (user_id = auth.uid());
 
 -- Audit Events: Read-only for authorized audit/executive roles; STRICTLY ZERO UPDATE OR DELETE
 CREATE POLICY audit_select ON public.audit_events FOR SELECT TO authenticated
-USING (auth.has_capability('audit.view.all'));
+USING (public.has_capability('audit.view.all'));
 
 CREATE POLICY audit_insert ON public.audit_events FOR INSERT TO authenticated
 WITH CHECK (auth.uid() IS NOT NULL);
@@ -541,8 +545,8 @@ WITH CHECK (auth.uid() IS NOT NULL);
 -- System Settings: Read by all authenticated; manage by admin
 CREATE POLICY system_settings_read ON public.system_settings FOR SELECT TO authenticated USING (true);
 CREATE POLICY system_settings_write ON public.system_settings FOR ALL TO authenticated
-USING (auth.has_capability('config.manage'))
-WITH CHECK (auth.has_capability('config.manage'));
+USING (public.has_capability('config.manage'))
+WITH CHECK (public.has_capability('config.manage'));
 
 -- Idempotency Keys: User scoped
 CREATE POLICY idempotency_policy ON public.idempotency_keys FOR ALL TO authenticated
