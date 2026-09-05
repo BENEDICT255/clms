@@ -1,0 +1,68 @@
+.clms-tabs {
+  display: flex;
+  background-color: var(--color-surface-card);
+  border-bottom: 1px solid var(--color-border-hairline);
+  padding: 0 var(--space-4);
+  gap: var(--space-6);
+}
+
+.clms-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 44px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+  margin-bottom: -1px;
+}
+
+.clms-tab:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.clms-tab--active {
+  color: var(--color-brand-primary);
+  border-bottom-color: var(--color-brand-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.clms-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clms-tab__count {
+  font-size: var(--font-size-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+}
+
+.clms-tab--active .clms-tab__count {
+  background-color: var(--color-brand-subtle);
+  color: var(--color-brand-primary);
+}
+
+/* Notification Indicator Badge */
+.clms-notification-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-brand-primary);
+  color: var(--color-text-inverse);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+}

@@ -1,0 +1,48 @@
+.clms-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-subtle) 25%,
+    var(--color-surface-inset) 37%,
+    var(--color-surface-subtle) 63%
+  );
+  background-size: 400% 100%;
+  animation: clms-skeleton-loading 1.4s ease infinite;
+}
+
+@keyframes clms-skeleton-loading {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.clms-spinner {
+  display: inline-block;
+  border: 2px solid var(--color-border-hairline);
+  border-top-color: var(--color-brand-primary);
+  border-radius: 50%;
+  animation: clms-spinner-rotate 0.6s linear infinite;
+}
+
+.clms-spinner--sm {
+  width: 16px;
+  height: 16px;
+}
+
+.clms-spinner--md {
+  width: 24px;
+  height: 24px;
+}
+
+.clms-spinner--lg {
+  width: 36px;
+  height: 36px;
+}
+
+@keyframes clms-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

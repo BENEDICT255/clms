@@ -1,0 +1,177 @@
+.clms-topbar {
+  height: var(--topbar-height);
+  background-color: var(--color-surface-card);
+  border-bottom: 1px solid var(--color-border-hairline);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-6);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+}
+
+.clms-topbar__search-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  background-color: var(--color-surface-hover);
+  border: 1px solid var(--color-border-hairline);
+  border-radius: var(--radius-xs);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+  width: 280px;
+}
+
+.clms-topbar__search-trigger:hover {
+  background-color: var(--color-surface-card);
+  border-color: var(--color-border-medium);
+  color: var(--color-text-secondary);
+}
+
+.clms-topbar__search-placeholder {
+  flex: 1;
+  text-align: left;
+}
+
+.clms-topbar__search-kbd {
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-border-hairline);
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-tertiary);
+}
+
+.clms-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.clms-topbar__notification-wrapper {
+  position: relative;
+}
+
+.clms-topbar__notification-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+}
+
+.clms-topbar__user-menu-wrapper {
+  position: relative;
+}
+
+.clms-topbar__user-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  transition: background-color var(--transition-fast);
+}
+
+.clms-topbar__user-trigger:hover {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border-hairline);
+}
+
+.clms-topbar__avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background-color: var(--color-surface-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.clms-topbar__dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  width: 240px;
+  background-color: var(--color-surface-card);
+  border-radius: var(--radius-xs);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  z-index: var(--z-dropdown);
+  animation: clms-fade-in var(--transition-fast);
+}
+
+.clms-topbar__dropdown-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-hairline);
+}
+
+.clms-topbar__dropdown-name {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.clms-topbar__dropdown-email {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin-top: 1px;
+}
+
+.clms-topbar__dropdown-roles {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  color: var(--color-brand-primary);
+  font-weight: var(--font-weight-medium);
+  margin-top: var(--space-2);
+}
+
+.clms-topbar__dropdown-menu {
+  list-style: none;
+  padding: var(--space-1);
+}
+
+.clms-topbar__dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.clms-topbar__dropdown-item:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.clms-topbar__dropdown-item--danger {
+  color: var(--color-status-danger-text);
+}
+
+.clms-topbar__dropdown-item--danger:hover {
+  background-color: var(--color-status-danger-bg);
+  color: var(--color-status-danger-text);
+}

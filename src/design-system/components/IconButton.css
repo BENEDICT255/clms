@@ -1,0 +1,41 @@
+.clms-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-secondary);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.clms-icon-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.clms-icon-button--sm {
+  width: 28px;
+  height: 28px;
+}
+
+.clms-icon-button--md {
+  width: 34px;
+  height: 34px;
+}
+
+.clms-icon-button--secondary {
+  background-color: var(--color-surface-card);
+  border-color: var(--color-border-hairline);
+  color: var(--color-text-primary);
+}
+
+.clms-icon-button--secondary:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.clms-icon-button--tertiary:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}

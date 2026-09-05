@@ -1,0 +1,76 @@
+.clms-table-container {
+  background-color: var(--color-surface-card);
+  border-radius: var(--radius-xs);
+  overflow-x: auto;
+  width: 100%;
+}
+
+.clms-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+}
+
+.clms-table thead {
+  background-color: var(--color-surface-hover);
+  border-bottom: 1px solid var(--color-border-hairline);
+}
+
+.clms-table th {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-label);
+  white-space: nowrap;
+}
+
+.clms-table td {
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: middle;
+}
+
+.clms-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.clms-table tbody tr:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.clms-table__tr--clickable {
+  cursor: pointer;
+}
+
+.clms-table__th--right {
+  text-align: right;
+}
+
+/* Pagination */
+.clms-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-surface-card);
+  border-top: 1px solid var(--color-border-hairline);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.clms-pagination__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.clms-pagination__page-indicator {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}

@@ -1,0 +1,66 @@
+.clms-financial-val {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  font-family: var(--font-family-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.clms-financial-val__currency {
+  font-size: 0.8em;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.clms-financial-val--sm {
+  font-size: var(--font-size-sm);
+}
+
+.clms-financial-val--md {
+  font-size: var(--font-size-base);
+}
+
+.clms-financial-val--lg {
+  font-size: var(--font-size-xl);
+}
+
+.clms-financial-val--hero {
+  font-size: var(--font-size-hero);
+  letter-spacing: var(--letter-spacing-tight);
+}
+
+/* Financial Summary Strip */
+.clms-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  background-color: var(--color-surface-card);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.clms-summary-strip__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  border-right: 1px solid var(--color-border-hairline);
+}
+
+.clms-summary-strip__item:last-child {
+  border-right: none;
+}
+
+.clms-summary-strip__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.clms-summary-strip__badge {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}

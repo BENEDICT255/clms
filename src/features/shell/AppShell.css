@@ -1,0 +1,74 @@
+.clms-app-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--color-surface-canvas);
+}
+
+.clms-app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  margin-left: var(--sidebar-width-expanded);
+  transition: margin-left var(--transition-normal);
+}
+
+.clms-app-layout--collapsed .clms-app-main {
+  margin-left: var(--sidebar-width-collapsed);
+}
+
+.clms-app-content {
+  flex: 1;
+  padding: var(--page-padding);
+  max-width: 1600px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* Notifications inside Drawer */
+.clms-notifications-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.clms-notification-card {
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-surface-card);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.clms-notification-card:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.clms-notification-card--unread {
+  border-left: 3px solid var(--color-brand-primary);
+  background-color: var(--color-brand-subtle);
+}
+
+.clms-notification-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.clms-notification-card__title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.clms-notification-card__time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.clms-notification-card__message {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-snug);
+}
