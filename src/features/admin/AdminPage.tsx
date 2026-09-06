@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Edit2,
   CheckCircle2,
+  Plus,
 } from 'lucide-react';
 
 export function AdminPage() {
@@ -44,8 +45,23 @@ export function AdminPage() {
   const [roles, setRoles] = useState<AdminRoleItem[]>([]);
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [suppliers, setSuppliers] = useState<AdminSupplierBinding[]>([]);
+  const [projects, setProjects] = useState<Array<{ id: string; code: string; name: string; projectTypeCode?: string | undefined }>>([]);
   const [auditLogs, setAuditLogs] = useState<AuditEventRecord[]>([]);
   const [auditEntityTypeFilter, setAuditEntityTypeFilter] = useState('ALL');
+
+  // Add Supplier Modal
+  const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState('');
+  const [newSupplierCode, setNewSupplierCode] = useState('');
+  const [newSupplierTaxId, setNewSupplierTaxId] = useState('');
+  const [isSavingSupplier, setIsSavingSupplier] = useState(false);
+
+  // Add Project Modal
+  const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectCode, setNewProjectCode] = useState('');
+  const [newProjectTypeCode, setNewProjectTypeCode] = useState('SITE_IMPROVEMENT');
+  const [isSavingProject, setIsSavingProject] = useState(false);
 
   // Edit Setting Modal
   const [editSetting, setEditSetting] = useState<AdminSettingItem | null>(null);
@@ -68,6 +84,9 @@ export function AdminPage() {
       } else if (activeTab === 'suppliers-master') {
         const data = await adminRepository.getSuppliers();
         setSuppliers(data);
+      } else if (activeTab === 'projects-master') {
+        const data = await adminRepository.getProjects();
+        setProjects(data);
       } else if (activeTab === 'audit-log') {
         const data = await adminRepository.getAuditTrail({
           entityType: auditEntityTypeFilter,
@@ -90,9 +109,57 @@ export function AdminPage() {
     { id: 'roles-capabilities', label: 'Roles & Capabilities' },
     { id: 'users-access', label: 'Users & Access' },
     { id: 'suppliers-master', label: 'Supplier Master' },
+    { id: 'projects-master', label: 'Target Projects' },
     { id: 'numbering-preview', label: 'Numbering Sequences' },
     { id: 'audit-log', label: 'Audit Trail' },
   ];
+
+  const handleCreateSupplier = async () => {
+    if (!newSupplierName.trim() || !newSupplierCode.trim() || !newSupplierTaxId.trim()) return;
+    setIsSavingSupplier(true);
+    try {
+      const res = await adminRepository.createSupplier({
+        name: newSupplierName,
+        vendorCode: newSupplierCode,
+        taxId: newSupplierTaxId,
+      });
+      if (res.success) {
+        setFeedback(`Supplier "${newSupplierName}" registered successfully.`);
+        setIsAddSupplierOpen(false);
+        setNewSupplierName('');
+        setNewSupplierCode('');
+        setNewSupplierTaxId('');
+        fetchData();
+      } else {
+        setFeedback(`Failed to register supplier: ${res.error}`);
+      }
+    } finally {
+      setIsSavingSupplier(false);
+    }
+  };
+
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim() || !newProjectCode.trim()) return;
+    setIsSavingProject(true);
+    try {
+      const res = await adminRepository.createProject({
+        name: newProjectName,
+        code: newProjectCode,
+        projectTypeCode: newProjectTypeCode || 'SITE_IMPROVEMENT',
+      });
+      if (res.success) {
+        setFeedback(`Project "${newProjectName}" registered successfully.`);
+        setIsAddProjectOpen(false);
+        setNewProjectName('');
+        setNewProjectCode('');
+        fetchData();
+      } else {
+        setFeedback(`Failed to create project: ${res.error}`);
+      }
+    } finally {
+      setIsSavingProject(false);
+    }
+  };
 
   const handleOpenEditSetting = (item: AdminSettingItem) => {
     setEditSetting(item);
@@ -188,6 +255,35 @@ export function AdminPage() {
     { header: 'Contact Email', accessorKey: 'contactEmail', cell: (r) => r.contactEmail || '—' },
     { header: 'Bound Users', accessorKey: 'boundUsersCount', align: 'center', width: '120px' },
     { header: 'Active Packages', accessorKey: 'activePackagesCount', align: 'center', width: '140px' },
+  ];
+
+  // 3.5 Project Columns
+  const projectColumns: Column<{ id: string; code: string; name: string; projectTypeCode?: string | undefined }>[] = [
+    {
+      header: 'Project Code',
+      accessorKey: 'code',
+      width: '180px',
+      cell: (r) => <span style={{ fontFamily: 'monospace', fontWeight: 'var(--font-weight-semibold)' }}>{r.code}</span>,
+    },
+    { header: 'Project Name', accessorKey: 'name' },
+    {
+      header: 'Project Type',
+      accessorKey: 'projectTypeCode',
+      width: '200px',
+      cell: (r) => (
+        <span
+          style={{
+            fontSize: 'var(--font-size-2xs)',
+            padding: '2px 8px',
+            backgroundColor: 'var(--color-surface-sunken)',
+            borderRadius: 'var(--radius-xs)',
+            border: '1px solid var(--color-border-hairline)',
+          }}
+        >
+          {r.projectTypeCode || 'SITE_IMPROVEMENT'}
+        </span>
+      ),
+    },
   ];
 
   // 4. Audit Trail Columns
@@ -345,13 +441,48 @@ export function AdminPage() {
 
       {/* Tab 4: Supplier Master */}
       {activeTab === 'suppliers-master' && (
-        <DataTable
-          columns={supplierColumns}
-          data={suppliers}
-          isLoading={isLoading}
-          emptyTitle="No suppliers registered"
-          emptyDescription="Commercial supplier organizations will display here."
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Plus size={14} />}
+              onClick={() => setIsAddSupplierOpen(true)}
+            >
+              Add Supplier Organization
+            </Button>
+          </div>
+          <DataTable
+            columns={supplierColumns}
+            data={suppliers}
+            isLoading={isLoading}
+            emptyTitle="No suppliers registered"
+            emptyDescription="Commercial supplier organizations will display here."
+          />
+        </div>
+      )}
+
+      {/* Tab 4.5: Target Projects */}
+      {activeTab === 'projects-master' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Plus size={14} />}
+              onClick={() => setIsAddProjectOpen(true)}
+            >
+              Add Target Project
+            </Button>
+          </div>
+          <DataTable
+            columns={projectColumns}
+            data={projects}
+            isLoading={isLoading}
+            emptyTitle="No target projects registered"
+            emptyDescription="Target projects will appear here."
+          />
+        </div>
       )}
 
       {/* Tab 5: Numbering Sequences */}
@@ -516,6 +647,186 @@ export function AdminPage() {
                 id="setting-value-input"
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Add Supplier Modal */}
+      {isAddSupplierOpen && (
+        <Modal
+          isOpen={isAddSupplierOpen}
+          onClose={() => setIsAddSupplierOpen(false)}
+          title="Register Supplier Organization"
+          footer={
+            <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" size="md" disabled={isSavingSupplier} onClick={() => setIsAddSupplierOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                disabled={isSavingSupplier || !newSupplierName.trim() || !newSupplierCode.trim() || !newSupplierTaxId.trim()}
+                icon={isSavingSupplier ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                onClick={handleCreateSupplier}
+              >
+                {isSavingSupplier ? 'Registering...' : 'Register Supplier'}
+              </Button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <div>
+              <label
+                htmlFor="supplier-name-input"
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-1)',
+                }}
+              >
+                Supplier Legal Name *
+              </label>
+              <Input
+                id="supplier-name-input"
+                placeholder="e.g. PRIME POWER T LTD"
+                value={newSupplierName}
+                onChange={(e) => setNewSupplierName(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="supplier-code-input"
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-1)',
+                }}
+              >
+                Vendor Code (PO Supplier ID) *
+              </label>
+              <Input
+                id="supplier-code-input"
+                placeholder="e.g. S4.P01007"
+                value={newSupplierCode}
+                onChange={(e) => setNewSupplierCode(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="supplier-tax-input"
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-1)',
+                }}
+              >
+                TIN / VAT Number *
+              </label>
+              <Input
+                id="supplier-tax-input"
+                placeholder="e.g. 112252525"
+                value={newSupplierTaxId}
+                onChange={(e) => setNewSupplierTaxId(e.target.value)}
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Add Project Modal */}
+      {isAddProjectOpen && (
+        <Modal
+          isOpen={isAddProjectOpen}
+          onClose={() => setIsAddProjectOpen(false)}
+          title="Create Target Project"
+          footer={
+            <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" size="md" disabled={isSavingProject} onClick={() => setIsAddProjectOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                disabled={isSavingProject || !newProjectName.trim() || !newProjectCode.trim()}
+                icon={isSavingProject ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                onClick={handleCreateProject}
+              >
+                {isSavingProject ? 'Creating...' : 'Create Project'}
+              </Button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <div>
+              <label
+                htmlFor="project-name-input"
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-1)',
+                }}
+              >
+                Project Name *
+              </label>
+              <Input
+                id="project-name-input"
+                placeholder="e.g. Site Improvement (Oversite Aggregates and Concrete)"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="project-code-input"
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-1)',
+                }}
+              >
+                Project Code *
+              </label>
+              <Input
+                id="project-code-input"
+                placeholder="e.g. PRJ-SI-001"
+                value={newProjectCode}
+                onChange={(e) => setNewProjectCode(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="project-type-input"
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 'var(--space-1)',
+                }}
+              >
+                Project Type Code *
+              </label>
+              <Input
+                id="project-type-input"
+                placeholder="e.g. SITE_IMPROVEMENT"
+                value={newProjectTypeCode}
+                onChange={(e) => setNewProjectTypeCode(e.target.value)}
               />
             </div>
           </div>

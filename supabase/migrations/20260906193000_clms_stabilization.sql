@@ -278,3 +278,26 @@ $$;
 -- 6. Lock down permissions
 REVOKE EXECUTE ON FUNCTION public.ingest_commercial_package_atomic FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ingest_commercial_package_atomic TO authenticated;
+
+-- 7. Allow internal staff with config.manage or package.import to manage master suppliers & projects
+DROP POLICY IF EXISTS suppliers_admin_write ON public.suppliers;
+CREATE POLICY suppliers_admin_write ON public.suppliers
+  FOR ALL
+  TO authenticated
+  USING (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')))
+  WITH CHECK (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')));
+
+DROP POLICY IF EXISTS projects_admin_write ON public.projects;
+CREATE POLICY projects_admin_write ON public.projects
+  FOR ALL
+  TO authenticated
+  USING (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')))
+  WITH CHECK (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')));
+
+DROP POLICY IF EXISTS project_types_admin_write ON public.project_types;
+CREATE POLICY project_types_admin_write ON public.project_types
+  FOR ALL
+  TO authenticated
+  USING (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')))
+  WITH CHECK (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')));
+

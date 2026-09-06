@@ -178,8 +178,8 @@ export class AdminRepository {
         .select(`
           id,
           name,
-          tax_number,
-          contact_email,
+          vendor_code,
+          tax_id,
           users ( id ),
           purchase_orders ( id )
         `)
@@ -192,8 +192,8 @@ export class AdminRepository {
       type SupplierQueryRow = {
         id: string;
         name: string;
-        tax_number?: string;
-        contact_email?: string;
+        vendor_code?: string;
+        tax_id?: string;
         users?: Array<{ id: string }>;
         purchase_orders?: Array<{ id: string }>;
       };
@@ -201,13 +201,94 @@ export class AdminRepository {
       return (data as unknown as SupplierQueryRow[]).map((s) => ({
         supplierId: s.id,
         supplierName: s.name,
-        taxNumber: s.tax_number ?? undefined,
-        contactEmail: s.contact_email ?? undefined,
+        taxNumber: s.tax_id ?? undefined,
+        contactEmail: undefined,
         boundUsersCount: s.users?.length || 0,
         activePackagesCount: s.purchase_orders?.length || 0,
       }));
     } catch (err: unknown) {
       console.warn('getSuppliers exception:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Creates a new supplier organization.
+   */
+  public async createSupplier(params: { name: string; vendorCode: string; taxId: string }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase.from('suppliers').insert({
+        name: params.name.trim(),
+        vendor_code: params.vendorCode.trim(),
+        tax_id: params.taxId.trim(),
+        is_active: true,
+      });
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Creates a new target project.
+   */
+  public async createProject(params: { name: string; code: string; projectTypeCode: string }): Promise<{ success: boolean; error?: string }> {
+    try {
+      let { data: typeRow } = await supabase
+        .from('project_types')
+        .select('id')
+        .eq('code', params.projectTypeCode)
+        .maybeSingle();
+
+      if (!typeRow) {
+        const { data: newType, error: typeErr } = await supabase
+          .from('project_types')
+          .insert({
+            code: params.projectTypeCode,
+            name: params.projectTypeCode.replace(/_/g, ' '),
+          })
+          .select('id')
+          .single();
+        if (typeErr || !newType) return { success: false, error: typeErr?.message || 'Failed to create project type' };
+        typeRow = newType;
+      }
+
+      const { error } = await supabase.from('projects').insert({
+        name: params.name.trim(),
+        code: params.code.trim(),
+        project_type_id: typeRow.id,
+      });
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Retrieves target projects with project type codes.
+   */
+  public async getProjects(): Promise<Array<{ id: string; code: string; name: string; projectTypeCode?: string | undefined }>> {
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select(`
+          id,
+          code,
+          name,
+          project_types ( code )
+        `)
+        .order('name');
+      if (error || !data) return [];
+      type ProjectRow = { id: string; code: string; name: string; project_types?: { code: string } | null };
+      return (data as unknown as ProjectRow[]).map((p) => ({
+        id: p.id,
+        code: p.code,
+        name: p.name,
+        projectTypeCode: p.project_types?.code,
+      }));
+    } catch {
       return [];
     }
   }

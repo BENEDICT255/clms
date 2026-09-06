@@ -115,10 +115,10 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
 
       setSession({
         projectId: selectedProjectId,
-        projectName: activeProject?.name || 'Commercial Rollout',
+        projectName: activeProject?.name || '',
         projectTypeId: activeProject?.projectTypeId || '',
         supplierId: selectedSupplierId,
-        supplierName: activeSupplier?.name || 'Prime Power Ltd',
+        supplierName: activeSupplier?.name || '',
         boqFile,
         boqFileHash: boqHash,
         poFile,
