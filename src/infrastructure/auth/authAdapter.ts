@@ -86,79 +86,82 @@ export class SupabaseAuthService implements IAuthService {
 
   private async fetchUserProfile(userId: string, email: string): Promise<UserProfile> {
     try {
-      // Query profile with roles and capabilities
-      interface RoleCapabilityRow {
-        capabilities?: {
-          code: string;
-        } | null;
-      }
-
-      interface RoleRow {
-        code: string;
-        role_capabilities?: RoleCapabilityRow[] | null;
-      }
-
-      interface UserRoleAssignmentRow {
-        roles?: RoleRow | null;
-      }
-
-      interface UserProfileRow {
-        id: string;
-        email: string;
-        full_name: string;
-        supplier_id: string | null;
-        is_active: boolean;
-        user_role_assignments?: UserRoleAssignmentRow[] | null;
-      }
-
-      const { data: userRow } = await supabase
+      // 1. Fetch user base profile
+      const { data: userRow, error: userError } = await supabase
         .from('users')
-        .select(`
-          id,
-          email,
-          full_name,
-          supplier_id,
-          is_active,
-          user_role_assignments (
-            roles (
-              code,
-              role_capabilities (
-                capabilities (
-                  code
-                )
-              )
-            )
-          )
-        `)
+        .select('id, email, full_name, supplier_id, is_active')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
+
+      if (userError) {
+        console.warn('Could not fetch user profile from public.users:', userError.message);
+      }
 
       if (userRow) {
-        const typedUserRow = userRow as unknown as UserProfileRow;
-        const roles: RoleCode[] = [];
-        const capabilitiesSet = new Set<CapabilityCode>();
+        // 2. Fetch assigned roles
+        const { data: assignments, error: roleError } = await supabase
+          .from('user_role_assignments')
+          .select('role_id, roles(code)')
+          .eq('user_id', userId);
 
-        if (Array.isArray(typedUserRow.user_role_assignments)) {
-          typedUserRow.user_role_assignments.forEach((ura) => {
-            if (ura.roles) {
-              roles.push(ura.roles.code as RoleCode);
-              if (Array.isArray(ura.roles.role_capabilities)) {
-                ura.roles.role_capabilities.forEach((rc) => {
-                  if (rc.capabilities?.code) {
-                    capabilitiesSet.add(rc.capabilities.code as CapabilityCode);
-                  }
-                });
-              }
+        if (roleError) {
+          console.warn('Could not fetch user_role_assignments:', roleError.message);
+        }
+
+        const roles: RoleCode[] = [];
+        const roleIds: string[] = [];
+
+        if (Array.isArray(assignments)) {
+          assignments.forEach((a: unknown) => {
+            const assignment = a as { role_id?: string; roles?: { code?: string } | null };
+            if (assignment.roles?.code) {
+              roles.push(assignment.roles.code as RoleCode);
+            }
+            if (assignment.role_id) {
+              roleIds.push(assignment.role_id);
             }
           });
         }
 
+        // 3. Resolve capabilities
+        const capabilitiesSet = new Set<CapabilityCode>();
+
+        // If SYSTEM_ADMIN is assigned, grant all platform capabilities
+        if (roles.includes('SYSTEM_ADMIN')) {
+          const { data: allCaps } = await supabase.from('capabilities').select('code');
+          if (Array.isArray(allCaps)) {
+            allCaps.forEach((c: unknown) => {
+              const cap = c as { code?: string };
+              if (cap.code) capabilitiesSet.add(cap.code as CapabilityCode);
+            });
+          }
+        } else if (roleIds.length > 0) {
+          const { data: roleCaps } = await supabase
+            .from('role_capabilities')
+            .select('capabilities(code)')
+            .in('role_id', roleIds);
+
+          if (Array.isArray(roleCaps)) {
+            roleCaps.forEach((rc: unknown) => {
+              const roleCap = rc as { capabilities?: { code?: string } | null };
+              if (roleCap.capabilities?.code) {
+                capabilitiesSet.add(roleCap.capabilities.code as CapabilityCode);
+              }
+            });
+          }
+        }
+
+        // Ensure at least explorer.view if active
+        if (capabilitiesSet.size === 0) {
+          capabilitiesSet.add('explorer.view');
+        }
+
         return {
-          id: typedUserRow.id,
-          email: typedUserRow.email,
-          fullName: typedUserRow.full_name,
-          supplierId: typedUserRow.supplier_id,
-          isActive: typedUserRow.is_active,
+          id: userRow.id,
+          email: userRow.email,
+          fullName: userRow.full_name || email.split('@')[0],
+          supplierId: userRow.supplier_id,
+          isActive: userRow.is_active ?? true,
           roles,
           capabilities: Array.from(capabilitiesSet),
         };
