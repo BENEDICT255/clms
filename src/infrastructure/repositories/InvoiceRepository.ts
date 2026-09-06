@@ -1,10 +1,14 @@
 // ==============================================================================
 // CLMS Invoice Repository & Trusted Client Operations
 // ==============================================================================
+// Enforces:
+// - Reconciled schema contract (clms_reference, amount, tax_amount)
+// - Zero client-side official numbering (no INV-${Date.now()})
+// - Zero unsafe direct mutation fallbacks (all mutations through trusted RPCs)
+// ==============================================================================
 
 import { supabase } from '../supabase/client';
 import { InvoiceStatus } from '@/domain/invoicing/InvoiceEngine';
-import { auditRepository } from './AuditRepository';
 
 export interface InvoiceRecord {
   id: string;
@@ -46,11 +50,10 @@ export class InvoiceRepository {
         .from('invoices')
         .select(`
           id,
-          clms_ref,
+          clms_reference,
           supplier_invoice_number,
           amount,
           tax_amount,
-          total_amount,
           currency,
           status,
           submitted_at,
@@ -94,11 +97,10 @@ export class InvoiceRepository {
 
       type InvoiceQueryRow = {
         id: string;
-        clms_ref: string;
+        clms_reference: string;
         supplier_invoice_number?: string;
         amount: number | string;
         tax_amount: number | string;
-        total_amount: number | string;
         currency: string;
         status: string;
         submitted_at?: string;
@@ -124,10 +126,12 @@ export class InvoiceRepository {
         const po = cert?.purchase_orders;
         const supplier = po?.suppliers;
         const project = po?.commercial_packages?.projects;
+        const baseAmt = Number(row.amount) || 0;
+        const taxAmt = Number(row.tax_amount) || 0;
 
         return {
           id: row.id,
-          clmsRef: row.clms_ref,
+          clmsRef: row.clms_reference,
           supplierInvoiceNo: row.supplier_invoice_number || '—',
           certificateId: cert?.id || '',
           certificateNumber: cert?.certificate_number || '—',
@@ -135,11 +139,11 @@ export class InvoiceRepository {
           poNumber: po?.po_number || '—',
           supplierId: po?.supplier_id || '',
           supplierName: supplier?.name || '—',
-          projectName: project?.name || 'Standard Project',
+          projectName: project?.name || '—',
           currency: row.currency || 'TZS',
-          amount: Number(row.amount) || 0,
-          taxAmount: Number(row.tax_amount) || 0,
-          totalAmount: Number(row.total_amount) || 0,
+          amount: baseAmt,
+          taxAmount: taxAmt,
+          totalAmount: baseAmt + taxAmt,
           status: row.status as InvoiceStatus,
           submittedAt: row.submitted_at,
           createdAt: row.created_at,
@@ -164,7 +168,6 @@ export class InvoiceRepository {
     notes?: string;
   }): Promise<{ success: boolean; invoiceId?: string; clmsRef?: string; error?: string }> {
     try {
-      // 1. Try atomic PostgreSQL RPC create_invoice_from_certificate
       const { data, error } = await supabase.rpc('create_invoice_from_certificate', {
         p_certificate_id: input.certificateId,
         p_supplier_invoice_no: input.supplierInvoiceNo,
@@ -173,7 +176,11 @@ export class InvoiceRepository {
         p_notes: input.notes || '',
       });
 
-      if (!error && data && data.success) {
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data && data.success) {
         return {
           success: true,
           invoiceId: data.invoice_id,
@@ -181,61 +188,11 @@ export class InvoiceRepository {
         };
       }
 
-      if (error && !error.message.includes('does not exist')) {
-        return { success: false, error: error.message };
-      }
-
-      // Fallback
-      return await this.createInvoiceFallback(input);
+      return { success: false, error: 'Invoice creation failed: no confirmation returned.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error creating invoice';
       return { success: false, error: msg };
     }
-  }
-
-  private async createInvoiceFallback(input: {
-    certificateId: string;
-    supplierInvoiceNo: string;
-    invoiceDate: string;
-    amount: number;
-    taxAmount: number;
-    notes?: string;
-  }): Promise<{ success: boolean; invoiceId?: string; clmsRef?: string; error?: string }> {
-    const clmsRef = `INV-${Date.now().toString().slice(-6)}`;
-    const totalAmount = input.amount + input.taxAmount;
-
-    const { data: inv, error } = await supabase
-      .from('invoices')
-      .insert({
-        clms_ref: clmsRef,
-        supplier_invoice_number: input.supplierInvoiceNo,
-        certificate_id: input.certificateId,
-        amount: input.amount,
-        tax_amount: input.taxAmount,
-        total_amount: totalAmount,
-        currency: 'TZS',
-        status: 'DRAFT',
-        metadata: { invoiceDate: input.invoiceDate, notes: input.notes },
-      })
-      .select('id, clms_ref')
-      .single();
-
-    if (error || !inv) {
-      return { success: false, error: error?.message || 'Failed to insert invoice' };
-    }
-
-    await auditRepository.recordEvent({
-      action: 'INVOICE_DRAFT_CREATED',
-      entityType: 'INVOICE',
-      entityId: inv.id,
-      metadata: { clmsRef: inv.clms_ref, amount: input.amount, totalAmount },
-    });
-
-    return {
-      success: true,
-      invoiceId: inv.id,
-      clmsRef: inv.clms_ref,
-    };
   }
 
   public async submitInvoice(invoiceId: string): Promise<{ success: boolean; error?: string }> {
@@ -244,31 +201,15 @@ export class InvoiceRepository {
         p_invoice_id: invoiceId,
       });
 
-      if (!error && data && data.success) {
-        return { success: true };
-      }
-
-      if (error && !error.message.includes('does not exist')) {
+      if (error) {
         return { success: false, error: error.message };
       }
 
-      // Fallback
-      const now = new Date().toISOString();
-      const { error: updateErr } = await supabase
-        .from('invoices')
-        .update({ status: 'SUBMITTED', submitted_at: now, updated_at: now })
-        .eq('id', invoiceId);
+      if (data && data.success) {
+        return { success: true };
+      }
 
-      if (updateErr) return { success: false, error: updateErr.message };
-
-      await auditRepository.recordEvent({
-        action: 'INVOICE_SUBMITTED',
-        entityType: 'INVOICE',
-        entityId: invoiceId,
-        metadata: { submittedAt: now },
-      });
-
-      return { success: true };
+      return { success: false, error: 'Invoice submission failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error submitting invoice';
       return { success: false, error: msg };
@@ -296,41 +237,15 @@ export class InvoiceRepository {
         p_submitted_by: user?.id ?? null,
       });
 
-      if (!error && data && data.success) {
-        return { success: true };
-      }
-
-      if (error && !error.message.includes('does not exist')) {
+      if (error) {
         return { success: false, error: error.message };
       }
 
-      // Fallback
-      const now = new Date().toISOString();
-      const { error: updateErr } = await supabase
-        .from('invoices')
-        .update({
-          supplier_invoice_number: input.supplierInvoiceNo,
-          invoice_date: input.invoiceDate,
-          status: 'RESUBMITTED',
-          submitted_at: now,
-          updated_at: now,
-        })
-        .eq('id', input.invoiceId);
+      if (data && data.success) {
+        return { success: true };
+      }
 
-      if (updateErr) return { success: false, error: updateErr.message };
-
-      await auditRepository.recordEvent({
-        action: 'INVOICE_RESUBMITTED',
-        entityType: 'INVOICE',
-        entityId: input.invoiceId,
-        metadata: {
-          supplierInvoiceNo: input.supplierInvoiceNo,
-          invoiceDate: input.invoiceDate,
-          resubmittedAt: now,
-        },
-      });
-
-      return { success: true };
+      return { success: false, error: 'Invoice resubmission failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error resubmitting invoice';
       return { success: false, error: msg };

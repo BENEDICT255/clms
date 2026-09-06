@@ -29,7 +29,8 @@ import {
   ProjectLookup,
   SupplierLookup,
 } from '@/infrastructure/repositories/CommercialPackageRepository';
-import { IngestionService, IngestionSessionState } from '@/application/services/IngestionService';
+import { IngestionService, IngestionSessionState, canConfirmCommercialPackage } from '@/application/services/IngestionService';
+import { CommercialCrossValidator } from '@/domain/commercial/CrossValidator';
 import { ExtractedSiteLine } from '@/domain/commercial/types';
 import { useAuth } from '@/app/providers/AuthContext';
 import './ImportPackageWizard.css';
@@ -64,6 +65,14 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
 
   const boqInputRef = useRef<HTMLInputElement>(null);
   const poInputRef = useRef<HTMLInputElement>(null);
+
+  const confirmationGate = session
+    ? canConfirmCommercialPackage(
+        session.boqResult,
+        session.poResult,
+        session.normalizedData?.crossValidation ?? null
+      )
+    : { canConfirm: false, blockingReasons: ['No active commercial document session.'] };
 
   useEffect(() => {
     Promise.all([
@@ -150,12 +159,29 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
 
     const newTotal = updatedSites.reduce((sum, s) => sum + s.authorizedAmount, 0);
 
+    const updatedBOQ = session.boqResult
+      ? {
+          ...session.boqResult,
+          sites: updatedSites,
+          totalAmount: newTotal,
+        }
+      : null;
+
+    const crossValidation =
+      updatedBOQ && session.poResult
+        ? CommercialCrossValidator.validate(updatedBOQ, session.poResult, {
+            selectedSupplierName: session.supplierName,
+          })
+        : session.normalizedData.crossValidation;
+
     setSession({
       ...session,
+      boqResult: updatedBOQ,
       normalizedData: {
         ...session.normalizedData,
         sites: updatedSites,
         boqTotalAmount: newTotal,
+        crossValidation,
       },
     });
 
@@ -165,7 +191,19 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
   };
 
   const handleConfirmPackage = async () => {
-    if (!session) return;
+    if (!session || !session.normalizedData) return;
+
+    const gate = canConfirmCommercialPackage(
+      session.boqResult,
+      session.poResult,
+      session.normalizedData.crossValidation
+    );
+
+    if (!gate.canConfirm) {
+      alert(`COMMERCIAL PACKAGE CANNOT BE CONFIRMED:\n\n${gate.blockingReasons.join('\n')}`);
+      return;
+    }
+
     setIsSubmittingConfirm(true);
 
     try {
@@ -294,7 +332,7 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
                     {p.name} ({p.code})
                   </option>
                 ))}
-                {projects.length === 0 && <option value="">Default Commercial Project</option>}
+                {projects.length === 0 && <option value="">No active projects configured</option>}
               </select>
             </div>
 
@@ -313,7 +351,7 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
                     {s.name} ({s.vendorCode})
                   </option>
                 ))}
-                {suppliers.length === 0 && <option value="">Default Supplier Organization</option>}
+                {suppliers.length === 0 && <option value="">No active suppliers configured</option>}
               </select>
             </div>
           </div>
@@ -322,7 +360,12 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
             <Button variant="secondary" onClick={onCancel}>
               Cancel
             </Button>
-            <Button variant="primary" icon={<ArrowRight size={16} />} onClick={() => setStep(2)}>
+            <Button
+              variant="primary"
+              disabled={!selectedProjectId || !selectedSupplierId}
+              icon={<ArrowRight size={16} />}
+              onClick={() => setStep(2)}
+            >
               Continue to Document Upload
             </Button>
           </div>
@@ -434,24 +477,41 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
             Review extracted values, reconciled site allocations, and cross-validation status prior to binding commitments.
           </p>
 
-          {/* Cross validation alert */}
-          {session.normalizedData.crossValidation.isPass ? (
+          {/* Diagnostic Cross-Validation & Ingestion Gate Status (Sections 13, 14) */}
+          {!confirmationGate.canConfirm ? (
+            <Alert type="warning" title="COMMERCIAL PACKAGE CANNOT BE CONFIRMED" className="mb-4">
+              <div style={{ marginBottom: 'var(--space-2)' }}>
+                The following commercial blocking reasons must be remediated before this commitment can be confirmed:
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 'var(--space-4)' }}>
+                {confirmationGate.blockingReasons.map((reason, idx) => (
+                  <li key={idx} style={{ marginBottom: 'var(--space-1)' }}>
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          ) : session.normalizedData.crossValidation.hasWarnings ? (
+            <Alert type="warning" title="Commercial Cross-Validation Warnings" className="mb-4">
+              <ul style={{ margin: 0, paddingLeft: 'var(--space-4)' }}>
+                {session.normalizedData.crossValidation.warningMessages.map((w, idx) => (
+                  <li key={idx}>{w}</li>
+                ))}
+              </ul>
+            </Alert>
+          ) : (
             <Alert type="success" title="Commercial Cross-Validation Passed" className="mb-4">
               All extracted values, currencies, and site totals reconcile perfectly between the BOQ and Purchase Order.
             </Alert>
-          ) : (
-            <Alert type="warning" title="Discrepancy Detected During Cross-Validation" className="mb-4">
-              {session.normalizedData.crossValidation.blockingReasons.join(' ')}
-            </Alert>
           )}
 
-          {/* Metric Summary Strip */}
+          {/* Metric Summary Strip (Section 16: typed metric model) */}
           <FinancialSummaryStrip
             metrics={[
-              { label: 'Purchase Order No', amount: session.normalizedData.poNumber, currency: '' },
-              { label: 'Total Authorized Commitment', amount: session.normalizedData.boqTotalAmount, currency: session.normalizedData.currency },
-              { label: 'Extracted Sites', amount: session.normalizedData.sites.length, currency: '' },
-              { label: 'Detected Template', amount: session.normalizedData.templateVersion.replace(/_/g, ' '), currency: '' },
+              { kind: 'text', label: 'Purchase Order No', value: session.normalizedData.poNumber || '—' },
+              { kind: 'money', label: 'Total Authorized Commitment', amount: session.normalizedData.boqTotalAmount, currency: session.normalizedData.currency },
+              { kind: 'count', label: 'Extracted Sites', value: session.normalizedData.sites.length, suffix: 'Sites' },
+              { kind: 'text', label: 'Detected Template', value: session.normalizedData.templateVersion.replace(/^BOQ_TEMPLATE_/i, '').replace(/_/g, ' ') },
             ]}
             style={{ marginBottom: 'var(--space-4)' }}
           />
@@ -522,7 +582,16 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
             <Button variant="secondary" icon={<ArrowLeft size={16} />} onClick={() => setStep(2)}>
               Back to Documents
             </Button>
-            <Button variant="primary" icon={<ArrowRight size={16} />} onClick={() => setStep(5)}>
+            <Button
+              variant="primary"
+              disabled={!confirmationGate.canConfirm}
+              icon={<ArrowRight size={16} />}
+              onClick={() => {
+                if (confirmationGate.canConfirm) {
+                  setStep(5);
+                }
+              }}
+            >
               Proceed to Confirmation
             </Button>
           </div>
@@ -581,6 +650,7 @@ export function ImportPackageWizard({ onSuccess, onCancel }: ImportPackageWizard
             <Button
               variant="primary"
               isLoading={isSubmittingConfirm}
+              disabled={isSubmittingConfirm || !confirmationGate.canConfirm}
               icon={<CheckCircle size={16} />}
               onClick={handleConfirmPackage}
             >

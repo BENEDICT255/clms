@@ -2,15 +2,16 @@
 // CLMS Authoritative BOQ Parser Engine
 // ==============================================================================
 // Enforces Rules PS-01, PS-02, PS-03, PS-04:
+// - Template-specific system: checks registered dedicated adapters first
 // - Zero synthetic identifiers
 // - Zero value imputation
-// - Explicit accounting for every row
-// - Zero fallback to mock data
+// - Explicit accounting for every row with provenance
+// - Zero fallback to mock data (no siteName = siteId, no region = 'Unassigned')
 // ==============================================================================
 
 import * as XLSX from 'xlsx';
 import { ExtractedBOQResult, ExtractedSiteLine } from './types';
-import { detectBOQTemplate, TemplateDefinition } from './TemplateRegistry';
+import { findMatchingParserAdapter, detectBOQTemplate } from './TemplateRegistry';
 import { Money } from './Money';
 
 export interface ParseBOQOptions {
@@ -54,14 +55,20 @@ export class BOQParser {
       };
     }
 
-    // Identify candidate sheet (prefer sheet matching 'boq', 'commercial', 'schedule', or the first sheet)
+    // 1. Template Registry Architecture: Check dedicated versioned template adapters first
+    const dedicatedAdapter = findMatchingParserAdapter(workbook);
+    if (dedicatedAdapter) {
+      return dedicatedAdapter.parse(workbook);
+    }
+
+    // 2. Identify candidate sheet for standard heuristic parsing
     const targetSheetName =
       workbook.SheetNames.find((name) => /boq|commercial|schedule|sites|summary/i.test(name)) ||
       workbook.SheetNames[0];
 
     if (!targetSheetName) {
       return {
-        templateVersion: 'UNKNOWN',
+        templateVersion: 'UNSUPPORTED_TEMPLATE',
         totalAmount: 0,
         currency,
         sites: [],
@@ -73,7 +80,7 @@ export class BOQParser {
     const worksheet = workbook.Sheets[targetSheetName];
     if (!worksheet) {
       return {
-        templateVersion: 'UNKNOWN',
+        templateVersion: 'UNSUPPORTED_TEMPLATE',
         totalAmount: 0,
         currency,
         sites: [],
@@ -82,7 +89,7 @@ export class BOQParser {
       };
     }
 
-    // Convert sheet to row array (header scan)
+    // Convert sheet to row array
     const rawRows: (string | number | boolean | null | undefined)[][] = XLSX.utils.sheet_to_json(worksheet, {
       header: 1,
       raw: false,
@@ -91,7 +98,7 @@ export class BOQParser {
 
     if (rawRows.length === 0) {
       return {
-        templateVersion: 'UNKNOWN',
+        templateVersion: 'UNSUPPORTED_TEMPLATE',
         totalAmount: 0,
         currency,
         sites: [],
@@ -100,12 +107,12 @@ export class BOQParser {
       };
     }
 
-    // Find table header row (skip single-cell banner/title rows)
+    // Find table header row
     let headerRowIndex = -1;
     for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
       const row = rawRows[r] || [];
       const nonNullCells = row.filter((c) => c != null && String(c).trim() !== '');
-      if (nonNullCells.length < 2) continue; // Skip title banner rows
+      if (nonNullCells.length < 2) continue;
 
       const hasSiteKeyword = row.some((cell) => cell != null && /site/i.test(String(cell)));
       const hasAmountKeyword = row.some((cell) => cell != null && /amount|total|cost|val|price/i.test(String(cell)));
@@ -118,7 +125,7 @@ export class BOQParser {
 
     if (headerRowIndex === -1) {
       return {
-        templateVersion: 'UNKNOWN',
+        templateVersion: 'UNSUPPORTED_TEMPLATE',
         totalAmount: 0,
         currency,
         sites: [],
@@ -130,7 +137,7 @@ export class BOQParser {
     }
 
     const headerCells = (rawRows[headerRowIndex] || []).map((c) => (c != null ? String(c).trim() : ''));
-    const detectedTemplate: TemplateDefinition | null = detectBOQTemplate(workbook.SheetNames, headerCells);
+    const detectedTemplate = detectBOQTemplate(workbook.SheetNames, headerCells);
 
     if (!detectedTemplate) {
       warnings.push('Unrecognized BOQ template signature; parsed using standard column heuristic.');
@@ -160,7 +167,6 @@ export class BOQParser {
       }
     });
 
-    // Fallbacks if specific matches weren't found
     if (colSiteId === -1) {
       colSiteId = headerCells.findIndex((h) => /site/i.test(h));
     }
@@ -185,26 +191,20 @@ export class BOQParser {
 
     let calculatedTotal = Money.fromNumber(0, currency);
 
-    // Parse data rows starting after headerRowIndex
+    // Parse data rows
     for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
       const row = rawRows[r];
       if (!row || row.length === 0) continue;
 
       const rawSiteId = row[colSiteId];
-      if (rawSiteId == null || String(rawSiteId).trim() === '') {
-        // Skip purely blank rows
-        continue;
-      }
+      if (rawSiteId == null || String(rawSiteId).trim() === '') continue;
 
       const siteIdStr = String(rawSiteId).trim();
+      if (/total|sum|grand total/i.test(siteIdStr)) continue;
 
-      // Check if this row is a summary/total row
-      if (/total|sum|grand total/i.test(siteIdStr)) {
-        continue;
-      }
-
-      const rawSiteName = colSiteName !== -1 && row[colSiteName] != null ? String(row[colSiteName]).trim() : siteIdStr;
-      const rawRegion = colRegion !== -1 && row[colRegion] != null ? String(row[colRegion]).trim() : 'Unassigned';
+      // DO NOT fabricate siteName or region (Prompt Section 9)
+      const rawSiteName = colSiteName !== -1 && row[colSiteName] != null ? String(row[colSiteName]).trim() : '';
+      const rawRegion = colRegion !== -1 && row[colRegion] != null ? String(row[colRegion]).trim() : undefined;
       const rawScope = colScope !== -1 && row[colScope] != null ? String(row[colScope]).trim() : undefined;
 
       const rawAmountVal = row[colAmount];
@@ -213,7 +213,6 @@ export class BOQParser {
         continue;
       }
 
-      // Parse amount
       let numAmount: number;
       if (typeof rawAmountVal === 'number') {
         numAmount = rawAmountVal;
@@ -239,6 +238,13 @@ export class BOQParser {
         authorizedAmount: lineMoney.majorAmount,
         scopeDescription: rawScope,
         rawAmount: typeof rawAmountVal === 'number' ? rawAmountVal : String(rawAmountVal),
+        provenance: {
+          sourceSheet: targetSheetName,
+          row: r + 1,
+          colSiteId,
+          colAmount,
+          rawValue: String(rawAmountVal),
+        },
       });
     }
 

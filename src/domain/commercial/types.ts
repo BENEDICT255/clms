@@ -10,34 +10,51 @@ export type PackageStatus =
   | 'ACTIVE'
   | 'SUPERSEDED';
 
+export interface SiteLineProvenance {
+  sourceSheet: string;
+  row: number;
+  colSiteId?: number | undefined;
+  colAmount?: number | undefined;
+  rawValue?: string | undefined;
+}
+
 export interface ExtractedSiteLine {
   siteIdExt: string;
   siteName: string;
-  region: string;
+  region?: string | undefined;
   authorizedAmount: number;
   scopeDescription?: string | undefined;
   isOverridden?: boolean | undefined;
   rawAmount?: number | string | undefined;
   overrideReason?: string | undefined;
+  provenance?: SiteLineProvenance | undefined;
 }
 
 export interface ExtractedBOQResult {
   templateVersion: string;
   totalAmount: number;
   currency: string;
+  currencySource?: string | undefined;
   sites: ExtractedSiteLine[];
   warnings: string[];
   blockingErrors: string[];
-  rawSheetName?: string;
+  rawSheetName?: string | undefined;
 }
 
 export interface ExtractedPOResult {
   poNumber: string;
   supplierName: string;
+  supplierId?: string | undefined;
   authorizedAmount: number;
+  subtotalExclTax?: number | undefined;
+  taxAmount?: number | undefined;
+  orderTotalInclTax?: number | undefined;
   currency: string;
-  paymentTermsDays: number;
-  poDate?: string;
+  currencySource?: string | undefined;
+  paymentTermsDays: number | null;
+  paymentTermsText?: string | undefined;
+  scopeDescription?: string | undefined;
+  poDate?: string | undefined;
   warnings: string[];
   blockingErrors: string[];
 }
@@ -63,7 +80,11 @@ export interface NormalizedPackageExtraction {
   currency: string;
   poAuthorizedAmount: number;
   boqTotalAmount: number;
-  paymentTermsDays: number;
+  paymentTermsDays: number | null;
+  paymentTermsText?: string | undefined;
+  subtotalExclTax?: number | undefined;
+  taxAmount?: number | undefined;
+  orderTotalInclTax?: number | undefined;
   sites: ExtractedSiteLine[];
   crossValidation: CommercialCrossValidationResult;
   boqFileHash: string;

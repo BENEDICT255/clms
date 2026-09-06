@@ -4,7 +4,6 @@
 
 import { supabase } from '../supabase/client';
 import { InvoiceRecord } from './InvoiceRepository';
-import { auditRepository } from './AuditRepository';
 
 export interface InvoiceReviewHistoryItem {
   id: string;
@@ -133,52 +132,22 @@ export class SupplyChainRepository {
       } = await supabase.auth.getUser();
       const reviewerId = user?.id;
 
-      // 1. Attempt atomic PostgreSQL RPC
+      // Attempt atomic PostgreSQL RPC
       const { data, error } = await supabase.rpc('approve_invoice_supply_chain', {
         p_invoice_id: invoiceId,
         p_reviewer_id: reviewerId,
         p_notes: notes ?? null,
       });
 
-      if (!error && data && data.success) {
-        return { success: true };
-      }
-
-      if (error && !error.message.includes('does not exist')) {
+      if (error) {
         return { success: false, error: error.message };
       }
 
-      // Fallback
-      const now = new Date().toISOString();
-      const { error: updateErr } = await supabase
-        .from('invoices')
-        .update({
-          status: 'SC_APPROVED',
-          sc_approved_by: reviewerId,
-          sc_approved_at: now,
-          updated_at: now,
-        })
-        .eq('id', invoiceId);
-
-      if (updateErr) return { success: false, error: updateErr.message };
-
-      if (reviewerId) {
-        await supabase.from('invoice_reviews').insert({
-          invoice_id: invoiceId,
-          reviewer_id: reviewerId,
-          decision: 'APPROVED',
-          reason: notes || 'Approved by Supply Chain verification',
-        });
+      if (data && data.success) {
+        return { success: true };
       }
 
-      await auditRepository.recordEvent({
-        action: 'INVOICE_SC_APPROVED',
-        entityType: 'INVOICE',
-        entityId: invoiceId,
-        metadata: { notes: notes ?? null },
-      });
-
-      return { success: true };
+      return { success: false, error: 'Supply Chain approval failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error approving invoice';
       return { success: false, error: msg };
@@ -199,7 +168,7 @@ export class SupplyChainRepository {
       } = await supabase.auth.getUser();
       const reviewerId = user?.id;
 
-      // 1. Attempt atomic PostgreSQL RPC
+      // Attempt atomic PostgreSQL RPC
       const { data, error } = await supabase.rpc('return_supplier_invoice', {
         p_invoice_id: invoiceId,
         p_reviewer_id: reviewerId,
@@ -207,44 +176,15 @@ export class SupplyChainRepository {
         p_reason: reason,
       });
 
-      if (!error && data && data.success) {
-        return { success: true };
-      }
-
-      if (error && !error.message.includes('does not exist')) {
+      if (error) {
         return { success: false, error: error.message };
       }
 
-      // Fallback
-      const now = new Date().toISOString();
-      const { error: updateErr } = await supabase
-        .from('invoices')
-        .update({
-          status: 'RETURNED',
-          updated_at: now,
-        })
-        .eq('id', invoiceId);
-
-      if (updateErr) return { success: false, error: updateErr.message };
-
-      if (reviewerId) {
-        await supabase.from('invoice_reviews').insert({
-          invoice_id: invoiceId,
-          reviewer_id: reviewerId,
-          decision: 'RETURNED',
-          return_code: returnCode,
-          reason,
-        });
+      if (data && data.success) {
+        return { success: true };
       }
 
-      await auditRepository.recordEvent({
-        action: 'INVOICE_RETURNED',
-        entityType: 'INVOICE',
-        entityId: invoiceId,
-        metadata: { returnCode, reason },
-      });
-
-      return { success: true };
+      return { success: false, error: 'Invoice return failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error returning invoice';
       return { success: false, error: msg };

@@ -4,7 +4,6 @@
 
 import { supabase } from '../supabase/client';
 import { AgingEngine, AgingBucket } from '@/domain/finance/AgingEngine';
-import { auditRepository } from './AuditRepository';
 
 export interface FinanceQueueItem {
   id: string;
@@ -259,7 +258,7 @@ export class FinanceRepository {
       } = await supabase.auth.getUser();
       const createdBy = user?.id;
 
-      // 1. Attempt atomic PostgreSQL RPC post_invoice_payment
+      // Attempt atomic PostgreSQL RPC post_invoice_payment
       const { data, error } = await supabase.rpc('post_invoice_payment', {
         p_invoice_id: input.invoiceId,
         p_reference_number: input.referenceNumber,
@@ -270,7 +269,11 @@ export class FinanceRepository {
         p_created_by: createdBy ?? null,
       });
 
-      if (!error && data && data.success) {
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data && data.success) {
         return {
           success: true,
           paymentId: data.payment_id,
@@ -279,108 +282,11 @@ export class FinanceRepository {
         };
       }
 
-      if (error && !error.message.includes('does not exist')) {
-        return { success: false, error: error.message };
-      }
-
-      // Fallback
-      return await this.postPaymentFallback(input, createdBy);
+      return { success: false, error: 'Payment posting failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error posting payment transaction';
       return { success: false, error: msg };
     }
-  }
-
-  private async postPaymentFallback(
-    input: PostPaymentInput,
-    createdBy?: string
-  ): Promise<{ success: boolean; paymentId?: string; outstanding?: number; status?: string; error?: string }> {
-    // 1. Fetch invoice
-    const { data: inv, error: invErr } = await supabase
-      .from('invoices')
-      .select('id, clms_reference, amount, tax_amount, currency, status')
-      .eq('id', input.invoiceId)
-      .single();
-
-    if (invErr || !inv) {
-      return { success: false, error: 'Invoice not found' };
-    }
-
-    const totalPayable = (Number(inv.amount) || 0) + (Number(inv.tax_amount) || 0);
-
-    // 2. Fetch existing payments
-    const { data: payments } = await supabase
-      .from('payment_transactions')
-      .select('amount')
-      .eq('invoice_id', input.invoiceId);
-
-    const existingPaid = (payments || []).reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-    const outstanding = Math.max(0, totalPayable - existingPaid);
-
-    // Non-overpayment assertion
-    if (input.amount > outstanding) {
-      return {
-        success: false,
-        error: `PAYMENT_EXCEEDS_OUTSTANDING_BALANCE: Cannot pay ${input.amount.toLocaleString()} against outstanding balance of ${outstanding.toLocaleString()}.`,
-      };
-    }
-
-    // 3. Insert payment
-    const { data: paymentRecord, error: insertErr } = await supabase
-      .from('payment_transactions')
-      .insert({
-        invoice_id: input.invoiceId,
-        reference_number: input.referenceNumber,
-        payment_date: input.paymentDate,
-        amount: input.amount,
-        currency: inv.currency || 'TZS',
-        funding_source: input.fundingSource,
-        evidence_doc_id: input.evidenceDocId ?? null,
-        created_by: createdBy ?? null,
-      })
-      .select('id')
-      .single();
-
-    if (insertErr || !paymentRecord) {
-      return { success: false, error: insertErr?.message || 'Failed to record payment' };
-    }
-
-    const newOutstanding = Math.max(0, outstanding - input.amount);
-    const newStatus = newOutstanding <= 0 ? 'SETTLED' : 'PARTIALLY_PAID';
-
-    await supabase
-      .from('invoices')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', input.invoiceId);
-
-    await auditRepository.recordEvent({
-      action: 'PAYMENT_POSTED',
-      entityType: 'PAYMENT',
-      entityId: paymentRecord.id,
-      metadata: {
-        invoiceId: input.invoiceId,
-        referenceNumber: input.referenceNumber,
-        amount: input.amount,
-        newOutstanding,
-        status: newStatus,
-      },
-    });
-
-    if (newStatus === 'SETTLED') {
-      await auditRepository.recordEvent({
-        action: 'INVOICE_SETTLED',
-        entityType: 'INVOICE',
-        entityId: input.invoiceId,
-        metadata: { totalPayable, totalPaid: totalPayable },
-      });
-    }
-
-    return {
-      success: true,
-      paymentId: paymentRecord.id,
-      outstanding: newOutstanding,
-      status: newStatus,
-    };
   }
 
   /**

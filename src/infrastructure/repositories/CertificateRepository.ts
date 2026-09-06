@@ -1,10 +1,15 @@
 // ==============================================================================
 // CLMS Certificate Repository & Trusted Client Operations
 // ==============================================================================
+// Enforces:
+// - Reconciled schema contract (total_amount, certificate_site_allocations)
+// - Zero client-side sequence generation (no FAC-${Date.now()})
+// - Zero unsafe direct mutation fallbacks (all mutations through trusted RPCs)
+// - Row-level locking and concurrency invariants enforced at PostgreSQL layer
+// ==============================================================================
 
 import { supabase } from '../supabase/client';
 import { CertificateType, CertificateStatus } from '@/domain/certification/CertificationEngine';
-import { auditRepository } from './AuditRepository';
 
 export interface CertificateRecord {
   id: string;
@@ -14,7 +19,7 @@ export interface CertificateRecord {
   poNumber: string;
   supplierId: string;
   supplierName: string;
-  projectName?: string;
+  projectName?: string | undefined;
   currency: string;
   currentCertifiedAmount: number;
   status: CertificateStatus;
@@ -54,9 +59,8 @@ export class CertificateRepository {
           certificate_number,
           cert_type,
           currency,
-          current_certified_value,
+          total_amount,
           status,
-          template_version,
           issued_at,
           created_at,
           updated_at,
@@ -72,8 +76,9 @@ export class CertificateRepository {
           certificate_site_allocations (
             id,
             po_site_id,
+            previous_amount,
             current_amount,
-            percentage,
+            cumulative_amount,
             po_sites (
               id,
               authorized_amount,
@@ -112,9 +117,8 @@ export class CertificateRepository {
         certificate_number: string;
         cert_type: string;
         currency: string;
-        current_certified_value: number | string;
+        total_amount: number | string;
         status: string;
-        template_version?: string;
         issued_at?: string;
         created_at: string;
         updated_at: string;
@@ -128,8 +132,9 @@ export class CertificateRepository {
         certificate_site_allocations?: Array<{
           id: string;
           po_site_id: string;
+          previous_amount: number | string;
           current_amount: number | string;
-          percentage: number | string;
+          cumulative_amount: number | string;
           po_sites?: {
             id: string;
             authorized_amount: number | string;
@@ -148,14 +153,18 @@ export class CertificateRepository {
         const sites = allocations.map((alloc) => {
           const poSite = alloc.po_sites;
           const site = poSite?.sites;
+          const authAmt = Number(poSite?.authorized_amount) || 0;
+          const curAmt = Number(alloc.current_amount) || 0;
+          const pct = authAmt > 0 ? (curAmt / authAmt) * 100 : 0;
+
           return {
             poSiteId: alloc.po_site_id,
             siteIdExt: site?.site_id_ext || '—',
             siteName: site?.site_name || '—',
             region: site?.region || '—',
-            authorizedAmount: Number(poSite?.authorized_amount) || 0,
-            currentAmount: Number(alloc.current_amount) || 0,
-            percentage: Number(alloc.percentage) || 0,
+            authorizedAmount: authAmt,
+            currentAmount: curAmt,
+            percentage: Math.round(pct * 100) / 100,
           };
         });
 
@@ -167,11 +176,11 @@ export class CertificateRepository {
           poNumber: po?.po_number || '—',
           supplierId: po?.supplier_id || '',
           supplierName: supplier?.name || '—',
-          projectName: project?.name || 'Standard Project',
+          projectName: project?.name || '—',
           currency: row.currency || 'TZS',
-          currentCertifiedAmount: Number(row.current_certified_value) || 0,
+          currentCertifiedAmount: Number(row.total_amount) || 0,
           status: row.status as CertificateStatus,
-          templateVersion: row.template_version || 'PROVISIONAL_V1',
+          templateVersion: 'PROVISIONAL_V1',
           issuedAt: row.issued_at,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
@@ -191,7 +200,8 @@ export class CertificateRepository {
   }
 
   /**
-   * Creates a draft certificate using database concurrency locking (create_certificate_with_lock RPC)
+   * Creates a draft certificate using database concurrency locking (create_certificate_with_lock RPC).
+   * Zero client-side fallback: Rejects if RPC or database rejects.
    */
   public async createCertificate(input: {
     certType: CertificateType;
@@ -205,7 +215,6 @@ export class CertificateRepository {
     notes?: string;
   }): Promise<{ success: boolean; certificateId?: string; certificateNumber?: string; error?: string }> {
     try {
-      // 1. Try atomic PostgreSQL RPC with FOR UPDATE locking
       const { data, error } = await supabase.rpc('create_certificate_with_lock', {
         p_po_id: input.poId,
         p_cert_type: input.certType,
@@ -214,7 +223,11 @@ export class CertificateRepository {
         p_notes: input.notes || '',
       });
 
-      if (!error && data && data.success) {
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data && data.success) {
         return {
           success: true,
           certificateId: data.certificate_id,
@@ -222,81 +235,17 @@ export class CertificateRepository {
         };
       }
 
-      if (error && !error.message.includes('function create_certificate_with_lock') && !error.message.includes('does not exist')) {
-        return { success: false, error: error.message };
-      }
-
-      // Fallback for local development if RPC is not yet executed on server
-      return await this.createCertificateFallback(input);
+      return { success: false, error: 'Certificate creation failed: no confirmation returned.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unexpected failure creating certificate';
       return { success: false, error: msg };
     }
   }
 
-  private async createCertificateFallback(input: {
-    certType: CertificateType;
-    poId: string;
-    currency: string;
-    sites: Array<{
-      poSiteId: string;
-      currentAmount: number;
-      percentage: number;
-    }>;
-    notes?: string;
-  }): Promise<{ success: boolean; certificateId?: string; certificateNumber?: string; error?: string }> {
-    const totalAmount = input.sites.reduce((sum, s) => sum + s.currentAmount, 0);
-    const certNumber = `${input.certType}-${Date.now().toString().slice(-6)}`;
-
-    const { data: cert, error: certErr } = await supabase
-      .from('certificates')
-      .insert({
-        certificate_number: certNumber,
-        cert_type: input.certType,
-        po_id: input.poId,
-        currency: input.currency,
-        current_certified_value: totalAmount,
-        status: 'DRAFT',
-        template_version: 'PROVISIONAL_V1',
-        metadata: { notes: input.notes },
-      })
-      .select('id, certificate_number')
-      .single();
-
-    if (certErr || !cert) {
-      return { success: false, error: certErr?.message || 'Failed to insert certificate' };
-    }
-
-    // Insert site allocations
-    const allocRows = input.sites.map((s) => ({
-      certificate_id: cert.id,
-      po_site_id: s.poSiteId,
-      current_amount: s.currentAmount,
-      percentage: s.percentage,
-    }));
-
-    const { error: allocErr } = await supabase.from('certificate_site_allocations').insert(allocRows);
-    if (allocErr) {
-      return { success: false, error: allocErr.message };
-    }
-
-    await auditRepository.recordEvent({
-      action: 'CERTIFICATE_CREATED',
-      entityType: 'CERTIFICATE',
-      entityId: cert.id,
-      metadata: { certNumber: cert.certificate_number, totalAmount, certType: input.certType },
-    });
-
-    return {
-      success: true,
-      certificateId: cert.id,
-      certificateNumber: cert.certificate_number,
-    };
-  }
-
   /**
    * Approves a stage in the certificate workflow:
    * PROJECT_LEAD -> HEAD_OF_PROJECTS -> APPROVED
+   * Zero client-side fallback.
    */
   public async approveCertificateStage(
     certificateId: string,
@@ -310,31 +259,15 @@ export class CertificateRepository {
         p_comment: comment || '',
       });
 
-      if (!error && data && data.success) {
-        return { success: true, nextStatus: data.status };
-      }
-
-      if (error && !error.message.includes('does not exist')) {
+      if (error) {
         return { success: false, error: error.message };
       }
 
-      // Fallback
-      const nextStatus = stage === 'PROJECT_LEAD' ? 'PENDING_HEAD_OF_PROJECTS' : 'APPROVED';
-      const { error: updateErr } = await supabase
-        .from('certificates')
-        .update({ status: nextStatus, updated_at: new Date().toISOString() })
-        .eq('id', certificateId);
+      if (data && data.success) {
+        return { success: true, nextStatus: data.status };
+      }
 
-      if (updateErr) return { success: false, error: updateErr.message };
-
-      await auditRepository.recordEvent({
-        action: `CERTIFICATE_APPROVED_${stage}`,
-        entityType: 'CERTIFICATE',
-        entityId: certificateId,
-        metadata: { stage, nextStatus, comment },
-      });
-
-      return { success: true, nextStatus };
+      return { success: false, error: 'Stage approval failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error approving certificate';
       return { success: false, error: msg };
@@ -343,7 +276,7 @@ export class CertificateRepository {
 
   /**
    * Issues the approved certificate to the supplier idempotently.
-   * Freezes document version and creates notification.
+   * Zero client-side fallback.
    */
   public async issueCertificate(
     certificateId: string
@@ -353,31 +286,15 @@ export class CertificateRepository {
         p_certificate_id: certificateId,
       });
 
-      if (!error && data && data.success) {
-        return { success: true, issuedAt: data.issued_at };
-      }
-
-      if (error && !error.message.includes('does not exist')) {
+      if (error) {
         return { success: false, error: error.message };
       }
 
-      // Fallback
-      const now = new Date().toISOString();
-      const { error: updateErr } = await supabase
-        .from('certificates')
-        .update({ status: 'ISSUED', issued_at: now, updated_at: now })
-        .eq('id', certificateId);
+      if (data && data.success) {
+        return { success: true, issuedAt: data.issued_at };
+      }
 
-      if (updateErr) return { success: false, error: updateErr.message };
-
-      await auditRepository.recordEvent({
-        action: 'CERTIFICATE_ISSUED',
-        entityType: 'CERTIFICATE',
-        entityId: certificateId,
-        metadata: { issuedAt: now },
-      });
-
-      return { success: true, issuedAt: now };
+      return { success: false, error: 'Certificate issuance failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error issuing certificate';
       return { success: false, error: msg };
