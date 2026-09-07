@@ -110,24 +110,39 @@ export class CertificationEngine {
 
       const remainingBefore = remainingMoney.getAmount();
 
-      // Determine current certification amount
+      // Determine current certification amount with exact 2-decimal precision (Rule 40)
       let currentAmt = 0;
       let currentPct = 0;
 
       if (site.currentAmount !== undefined && site.currentAmount !== null) {
-        currentAmt = Math.round(Number(site.currentAmount));
+        // User explicitly typed an amount
+        const rawAmt = Number(site.currentAmount);
+        currentAmt = Math.round(rawAmt * 100) / 100;
         currentPct = site.authorizedAmount > 0
-          ? Number(((currentAmt / site.authorizedAmount) * 100).toFixed(2))
+          ? Number(((currentAmt / site.authorizedAmount) * 100).toFixed(4))
           : 0;
       } else if (site.currentPercentage !== undefined && site.currentPercentage !== null) {
+        // User set a percentage
         currentPct = Number(site.currentPercentage);
-        currentAmt = Math.round((site.authorizedAmount * currentPct) / 100);
+        if (currentPct >= 100) {
+          currentAmt = remainingBefore;
+        } else {
+          currentAmt = Math.min(
+            remainingBefore,
+            Math.round(((site.authorizedAmount * currentPct) / 100) * 100) / 100
+          );
+        }
       } else {
-        // Default to remaining certifiable balance for FAC, or 0
+        // Default to remaining certifiable balance for FAC, or 0 for PAC/DPC
         currentAmt = input.certType === 'FAC' ? remainingBefore : 0;
         currentPct = site.authorizedAmount > 0
-          ? Number(((currentAmt / site.authorizedAmount) * 100).toFixed(2))
+          ? Number(((currentAmt / site.authorizedAmount) * 100).toFixed(4))
           : 0;
+      }
+
+      // Safeguard: clamp within 1-cent floating point epsilon to remainingBefore
+      if (currentAmt > remainingBefore && currentAmt <= remainingBefore + 0.01) {
+        currentAmt = remainingBefore;
       }
 
       // Financial invariant check: currentAmt must not exceed remainingBefore
@@ -143,8 +158,8 @@ export class CertificationEngine {
         );
       }
 
-      const remainingAfter = Math.max(0, remainingBefore - currentAmt);
-      totalCertified += currentAmt;
+      const remainingAfter = Math.max(0, Math.round((remainingBefore - currentAmt) * 100) / 100);
+      totalCertified = Math.round((totalCertified + currentAmt) * 100) / 100;
 
       siteItems.push({
         poSiteId: site.poSiteId,

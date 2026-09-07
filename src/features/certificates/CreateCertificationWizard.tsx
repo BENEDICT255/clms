@@ -191,7 +191,7 @@ export function CreateCertificationWizard({
   };
 
   const handleSiteAmountChange = (poSiteId: string, amountStr: string) => {
-    const amt = parseFloat(amountStr) || 0;
+    const amt = Math.round((parseFloat(amountStr) || 0) * 100) / 100;
     setSiteInputs((prev) => {
       const copy = { ...prev };
       copy[poSiteId] = { currentAmount: amt };
@@ -631,17 +631,22 @@ export function CreateCertificationWizard({
                       <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>
                         <input
                           type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
                           value={siteInputs[item.poSiteId]?.currentPercentage ?? item.currentPercentage}
                           onChange={(e) => handleSitePercentageChange(item.poSiteId, e.target.value)}
-                          style={{ width: '65px', textAlign: 'right', fontSize: 'var(--font-size-xs)' }}
+                          style={{ width: '70px', textAlign: 'right', fontSize: 'var(--font-size-xs)' }}
                         />
                       </td>
                       <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>
                         <input
                           type="number"
-                          value={siteInputs[item.poSiteId]?.currentAmount ?? item.currentCertificationAmount}
+                          step="0.01"
+                          min="0"
+                          value={siteInputs[item.poSiteId]?.currentAmount !== undefined ? siteInputs[item.poSiteId]?.currentAmount : Number(item.currentCertificationAmount.toFixed(2))}
                           onChange={(e) => handleSiteAmountChange(item.poSiteId, e.target.value)}
-                          style={{ width: '110px', textAlign: 'right', fontSize: 'var(--font-size-xs)' }}
+                          style={{ width: '120px', textAlign: 'right', fontSize: 'var(--font-size-xs)' }}
                         />
                       </td>
                       <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right', fontWeight: 'var(--font-weight-semibold)' }}>

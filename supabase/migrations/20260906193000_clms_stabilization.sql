@@ -416,6 +416,11 @@ BEGIN
 
         v_remaining_balance := v_authorized_amount - v_previously_certified;
 
+        -- Tolerance for cent rounding: if current amount is within 0.05 of balance, clamp to exact balance
+        IF v_current_amount > v_remaining_balance AND v_current_amount <= (v_remaining_balance + 0.05) THEN
+            v_current_amount := v_remaining_balance;
+        END IF;
+
         -- CORE INVARIANT CHECK: Current Certified <= Remaining Balance
         IF v_current_amount > v_remaining_balance THEN
             RAISE EXCEPTION 'Over-certification blocked: Site allocation % current amount (%) exceeds remaining certifiable balance (%).',
