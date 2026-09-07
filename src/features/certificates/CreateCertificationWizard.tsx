@@ -108,9 +108,23 @@ export function CreateCertificationWizard({
     );
   };
 
-  const handleSelectAllSites = () => {
-    const certifiableSites = eligibleSitesForPO.filter((s) => s.remainingCertifiable > 0);
-    setSelectedSiteIds(certifiableSites.map((s) => s.poSiteId));
+  const certifiableSites = useMemo(() => {
+    return eligibleSitesForPO.filter((s) => s.remainingCertifiable > 0);
+  }, [eligibleSitesForPO]);
+
+  const areAllEligibleSelected = useMemo(() => {
+    return (
+      certifiableSites.length > 0 &&
+      certifiableSites.every((s) => selectedSiteIds.includes(s.poSiteId))
+    );
+  }, [certifiableSites, selectedSiteIds]);
+
+  const handleToggleSelectAllSites = () => {
+    if (areAllEligibleSelected) {
+      setSelectedSiteIds([]);
+    } else {
+      setSelectedSiteIds(certifiableSites.map((s) => s.poSiteId));
+    }
   };
 
   // Synchronize site inputs with domain calculation engine
@@ -429,8 +443,8 @@ export function CreateCertificationWizard({
                   Select sites ready for commercial certification. Only sites with positive remaining balance are eligible.
                 </div>
               </div>
-              <Button variant="secondary" size="sm" onClick={handleSelectAllSites}>
-                Select All Eligible
+              <Button variant="secondary" size="sm" onClick={handleToggleSelectAllSites}>
+                {areAllEligibleSelected ? 'Deselect All' : 'Select All Eligible'}
               </Button>
             </div>
 

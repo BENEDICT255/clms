@@ -23,10 +23,12 @@ ALTER TABLE public.audit_events ADD COLUMN IF NOT EXISTS new_state JSONB;
 -- 3. Notifications Drift Resolution (safe default for type)
 ALTER TABLE public.notifications ALTER COLUMN type SET DEFAULT 'IN_APP';
 
--- 4. Invoices & PO Schema Drift Resolution
+-- 4. Invoices, PO & Certificates Schema Drift Resolution
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
 ALTER TABLE public.purchase_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 ALTER TABLE public.sites ALTER COLUMN region DROP NOT NULL;
+ALTER TABLE public.certificates ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.certificate_site_allocations ADD COLUMN IF NOT EXISTS percentage NUMERIC(5, 2);
 
 -- 5. Atomic Commercial Package Ingestion Transaction
 CREATE OR REPLACE FUNCTION public.ingest_commercial_package_atomic(
@@ -300,4 +302,357 @@ CREATE POLICY project_types_admin_write ON public.project_types
   TO authenticated
   USING (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')))
   WITH CHECK (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')));
+
+-- ==============================================================================
+-- 8. Reconciled Certification RPCs (Prompt Section 24 & Section 31)
+-- ==============================================================================
+
+-- 8.1 Create Certificate with Lock (Matching Application RPC Contract)
+CREATE OR REPLACE FUNCTION public.create_certificate_with_lock(
+    p_po_id UUID,
+    p_cert_type TEXT,
+    p_sites_json JSONB,
+    p_currency TEXT DEFAULT 'TZS',
+    p_notes TEXT DEFAULT ''
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_actor_id UUID;
+    v_item JSONB;
+    v_po_site_id UUID;
+    v_current_amount NUMERIC(18, 2);
+    v_percentage NUMERIC(5, 2);
+    v_authorized_amount NUMERIC(18, 2);
+    v_previously_certified NUMERIC(18, 2);
+    v_remaining_balance NUMERIC(18, 2);
+    v_total_cert_amount NUMERIC(18, 2) := 0;
+    v_seq_num BIGINT;
+    v_cert_ref TEXT;
+    v_cert_id UUID;
+    v_po_record RECORD;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        SELECT id INTO v_actor_id FROM public.users WHERE is_active = true LIMIT 1;
+    END IF;
+
+    -- Validate certificate type
+    IF p_cert_type NOT IN ('FAC', 'PAC', 'DPC') THEN
+        RAISE EXCEPTION 'Invalid certificate type %. Must be FAC, PAC, or DPC.', p_cert_type;
+    END IF;
+
+    -- Lock the parent PO
+    SELECT * INTO v_po_record
+    FROM public.purchase_orders
+    WHERE id = p_po_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Purchase Order with ID % not found.', p_po_id;
+    END IF;
+
+    -- Generate official certificate reference from atomic sequence
+    v_seq_num := nextval('public.seq_certificate_number');
+    v_cert_ref := p_cert_type || '-SI-' || to_char(now(), 'YY') || '-' || lpad(v_seq_num::TEXT, 4, '0');
+
+    -- Pre-calculate total amount
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_sites_json) LOOP
+        v_current_amount := COALESCE((v_item->>'currentAmount')::NUMERIC, (v_item->>'current_amount')::NUMERIC, 0);
+        IF v_current_amount <= 0 THEN
+            RAISE EXCEPTION 'Current certified amount must be strictly positive.';
+        END IF;
+        v_total_cert_amount := v_total_cert_amount + v_current_amount;
+    END LOOP;
+
+    -- Create draft certificate
+    INSERT INTO public.certificates (
+        po_id,
+        certificate_number,
+        cert_type,
+        status,
+        total_amount,
+        currency,
+        notes,
+        created_by,
+        created_at,
+        updated_at
+    ) VALUES (
+        p_po_id,
+        v_cert_ref,
+        p_cert_type,
+        'DRAFT',
+        v_total_cert_amount,
+        COALESCE(p_currency, v_po_record.currency, 'TZS'),
+        p_notes,
+        v_actor_id,
+        now(),
+        now()
+    ) RETURNING id INTO v_cert_id;
+
+    -- Lock each po_site and verify financial invariants
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_sites_json) LOOP
+        v_po_site_id := COALESCE((v_item->>'poSiteId')::UUID, (v_item->>'po_site_id')::UUID);
+        v_current_amount := COALESCE((v_item->>'currentAmount')::NUMERIC, (v_item->>'current_amount')::NUMERIC, 0);
+        v_percentage := COALESCE((v_item->>'percentage')::NUMERIC, NULL);
+
+        -- Acquire exclusive row lock on po_site to prevent concurrent overdraft
+        SELECT ps.authorized_amount,
+               COALESCE(SUM(csa.current_amount) FILTER (WHERE c.status = 'ISSUED'), 0)::NUMERIC(18, 2)
+        INTO v_authorized_amount, v_previously_certified
+        FROM public.po_sites ps
+        LEFT JOIN public.certificate_site_allocations csa ON csa.po_site_id = ps.id
+        LEFT JOIN public.certificates c ON c.id = csa.certificate_id AND c.status != 'VOIDED'
+        WHERE ps.id = v_po_site_id AND ps.po_id = p_po_id
+        GROUP BY ps.id, ps.authorized_amount
+        FOR UPDATE OF ps;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'PO-Site allocation % does not belong to PO %.', v_po_site_id, p_po_id;
+        END IF;
+
+        v_remaining_balance := v_authorized_amount - v_previously_certified;
+
+        -- CORE INVARIANT CHECK: Current Certified <= Remaining Balance
+        IF v_current_amount > v_remaining_balance THEN
+            RAISE EXCEPTION 'Over-certification blocked: Site allocation % current amount (%) exceeds remaining certifiable balance (%).',
+                v_po_site_id, v_current_amount, v_remaining_balance;
+        END IF;
+
+        -- Insert certificate site allocation record
+        INSERT INTO public.certificate_site_allocations (
+            certificate_id,
+            po_site_id,
+            previous_amount,
+            current_amount,
+            cumulative_amount,
+            percentage
+        ) VALUES (
+            v_cert_id,
+            v_po_site_id,
+            v_previously_certified,
+            v_current_amount,
+            v_previously_certified + v_current_amount,
+            v_percentage
+        );
+    END LOOP;
+
+    -- Record immutable audit event
+    INSERT INTO public.audit_events (
+        entity_type,
+        entity_id,
+        action,
+        actor_id,
+        new_state,
+        created_at
+    ) VALUES (
+        'CERTIFICATE',
+        v_cert_id,
+        'CERTIFICATE_CREATED',
+        v_actor_id,
+        jsonb_build_object('certificate_number', v_cert_ref, 'total_amount', v_total_cert_amount, 'status', 'DRAFT', 'notes', p_notes),
+        now()
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'certificate_id', v_cert_id,
+        'certificate_number', v_cert_ref,
+        'total_amount', v_total_cert_amount,
+        'status', 'DRAFT'
+    );
+END;
+$$;
+
+-- 8.2 Approve Certificate Stage (Matching Application RPC Contract)
+CREATE OR REPLACE FUNCTION public.approve_certificate_stage(
+    p_certificate_id UUID,
+    p_stage TEXT,
+    p_comment TEXT DEFAULT '',
+    p_decision TEXT DEFAULT 'APPROVED'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_cert RECORD;
+    v_next_status TEXT;
+    v_actor_id UUID;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        SELECT id INTO v_actor_id FROM public.users WHERE is_active = true LIMIT 1;
+    END IF;
+
+    SELECT * INTO v_cert
+    FROM public.certificates
+    WHERE id = p_certificate_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Certificate with ID % not found.', p_certificate_id;
+    END IF;
+
+    IF p_decision = 'REJECTED' THEN
+        v_next_status := 'REJECTED';
+    ELSIF p_stage = 'PROJECT_LEAD' THEN
+        v_next_status := 'PENDING_HOP_APPROVAL';
+    ELSIF p_stage = 'HEAD_OF_PROJECTS' THEN
+        v_next_status := 'APPROVED';
+    ELSE
+        RAISE EXCEPTION 'Invalid approval stage: %', p_stage;
+    END IF;
+
+    -- Record approval decision
+    INSERT INTO public.certificate_approvals (
+        certificate_id,
+        approver_id,
+        stage,
+        decision,
+        comments
+    ) VALUES (
+        p_certificate_id,
+        v_actor_id,
+        p_stage,
+        p_decision,
+        p_comment
+    );
+
+    -- Update certificate state
+    UPDATE public.certificates
+    SET status = v_next_status,
+        updated_at = now()
+    WHERE id = p_certificate_id;
+
+    -- Audit event
+    INSERT INTO public.audit_events (
+        entity_type,
+        entity_id,
+        action,
+        actor_id,
+        new_state,
+        created_at
+    ) VALUES (
+        'CERTIFICATE',
+        p_certificate_id,
+        'CERTIFICATE_APPROVAL_' || p_decision,
+        v_actor_id,
+        jsonb_build_object('stage', p_stage, 'decision', p_decision, 'status', v_next_status, 'comment', p_comment),
+        now()
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'certificate_id', p_certificate_id,
+        'status', v_next_status
+    );
+END;
+$$;
+
+-- 8.3 Issue Certificate (Matching Application RPC Contract)
+CREATE OR REPLACE FUNCTION public.issue_certificate(
+    p_certificate_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_cert RECORD;
+    v_po RECORD;
+    v_supplier_user RECORD;
+    v_actor_id UUID;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        SELECT id INTO v_actor_id FROM public.users WHERE is_active = true LIMIT 1;
+    END IF;
+
+    SELECT * INTO v_cert
+    FROM public.certificates
+    WHERE id = p_certificate_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Certificate with ID % not found.', p_certificate_id;
+    END IF;
+
+    -- Idempotent return if already issued
+    IF v_cert.status = 'ISSUED' THEN
+        RETURN jsonb_build_object('success', true, 'status', 'ISSUED', 'issued_at', v_cert.issued_at, 'message', 'Certificate already issued');
+    END IF;
+
+    IF v_cert.status != 'APPROVED' THEN
+        RAISE EXCEPTION 'Certificate must be APPROVED before issuance. Current status: %', v_cert.status;
+    END IF;
+
+    -- Update certificate state to ISSUED
+    UPDATE public.certificates
+    SET status = 'ISSUED',
+        issued_at = now(),
+        updated_at = now()
+    WHERE id = p_certificate_id;
+
+    -- Audit event
+    INSERT INTO public.audit_events (
+        entity_type,
+        entity_id,
+        action,
+        actor_id,
+        new_state,
+        created_at
+    ) VALUES (
+        'CERTIFICATE',
+        p_certificate_id,
+        'CERTIFICATE_ISSUED',
+        v_actor_id,
+        jsonb_build_object('status', 'ISSUED', 'issued_at', now()),
+        now()
+    );
+
+    -- In-app notification to supplier users
+    SELECT * INTO v_po FROM public.purchase_orders WHERE id = v_cert.po_id;
+    IF FOUND THEN
+        FOR v_supplier_user IN 
+            SELECT id FROM public.users 
+            WHERE supplier_id = v_po.supplier_id AND is_active = true
+        LOOP
+            INSERT INTO public.notifications (user_id, type, title, message, entity_type, entity_id, created_at)
+            VALUES (
+                v_supplier_user.id,
+                'IN_APP',
+                'Certificate Issued: ' || v_cert.certificate_number,
+                'Certificate ' || v_cert.certificate_number || ' has been issued for PO ' || v_po.po_number || '. You may now submit your commercial invoice claim.',
+                'CERTIFICATE',
+                p_certificate_id,
+                now()
+            );
+        END LOOP;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'certificate_id', p_certificate_id,
+        'status', 'ISSUED',
+        'issued_at', now()
+    );
+END;
+$$;
+
+-- 8.4 Lock down permissions
+REVOKE EXECUTE ON FUNCTION public.create_certificate_with_lock(UUID, TEXT, JSONB, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_certificate_with_lock(UUID, TEXT, JSONB, TEXT, TEXT) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.approve_certificate_stage(UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.approve_certificate_stage(UUID, TEXT, TEXT, TEXT) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.issue_certificate(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.issue_certificate(UUID) TO authenticated;
+
 
