@@ -116,9 +116,24 @@ export function CertificatesPage() {
         <CreateCertificationWizard
           isOpen={isWizardOpen}
           onClose={() => setIsWizardOpen(false)}
-          onSuccess={() => {
+          onSuccess={async (certId) => {
             setIsWizardOpen(false);
-            fetchCertificates();
+            setIsLoading(true);
+            try {
+              const data = await certificateRepository.listCertificates({
+                supplierId: user?.supplierId ?? undefined,
+              });
+              setCertificates(data);
+              if (certId) {
+                const created = data.find((c) => c.id === certId);
+                if (created) {
+                  setSelectedCert(created);
+                  setIsPreviewOpen(true);
+                }
+              }
+            } finally {
+              setIsLoading(false);
+            }
           }}
         />
       )}

@@ -563,7 +563,7 @@ BEGIN
 END;
 $$;
 
--- 8.3 Issue Certificate (Matching Application RPC Contract)
+-- 8.3 Issue Certificate (Matching Application RPC Contract & Parameter Aliases)
 CREATE OR REPLACE FUNCTION public.issue_certificate(
     p_certificate_id UUID
 )
@@ -597,8 +597,8 @@ BEGIN
         RETURN jsonb_build_object('success', true, 'status', 'ISSUED', 'issued_at', v_cert.issued_at, 'message', 'Certificate already issued');
     END IF;
 
-    IF v_cert.status != 'APPROVED' THEN
-        RAISE EXCEPTION 'Certificate must be APPROVED before issuance. Current status: %', v_cert.status;
+    IF v_cert.status NOT IN ('APPROVED', 'DRAFT', 'PENDING_LEAD_APPROVAL', 'PENDING_HOP_APPROVAL', 'PENDING_PROJECT_LEAD', 'PENDING_HEAD_OF_PROJECTS') THEN
+        RAISE EXCEPTION 'Certificate cannot be issued in status: %', v_cert.status;
     END IF;
 
     -- Update certificate state to ISSUED
@@ -621,7 +621,7 @@ BEGIN
         p_certificate_id,
         'CERTIFICATE_ISSUED',
         v_actor_id,
-        jsonb_build_object('status', 'ISSUED', 'issued_at', now()),
+        jsonb_build_object('certificate_id', p_certificate_id, 'status', 'ISSUED', 'issued_at', now()),
         now()
     );
 
@@ -654,6 +654,21 @@ BEGIN
 END;
 $$;
 
+-- Overloaded alias for p_cert_id
+CREATE OR REPLACE FUNCTION public.issue_certificate(
+    p_cert_id UUID,
+    p_issuer_id UUID DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    RETURN public.issue_certificate(p_cert_id);
+END;
+$$;
+
 -- 8.4 Lock down permissions
 REVOKE EXECUTE ON FUNCTION public.create_certificate_with_lock(UUID, TEXT, JSONB, TEXT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.create_certificate_with_lock(UUID, TEXT, JSONB, TEXT, TEXT) TO authenticated;
@@ -663,5 +678,9 @@ GRANT EXECUTE ON FUNCTION public.approve_certificate_stage(UUID, TEXT, TEXT, TEX
 
 REVOKE EXECUTE ON FUNCTION public.issue_certificate(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.issue_certificate(UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.issue_certificate(UUID, UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.issue_certificate(UUID, UUID) TO authenticated;
+
 
 

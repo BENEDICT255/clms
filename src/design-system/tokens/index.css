@@ -172,3 +172,38 @@ body {
   white-space: nowrap;
   border-width: 0;
 }
+
+/* Print Media Styles: Authentic Multi-Page Export */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .clms-cert-document-container,
+  .clms-cert-document-container * {
+    visibility: visible;
+  }
+  .clms-cert-document-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .clms-cert-sheet {
+    box-shadow: none !important;
+    margin: 0 !important;
+    width: 100% !important;
+    page-break-after: always;
+    break-after: page;
+  }
+  .clms-cert-po-banner {
+    display: none !important;
+  }
+}
+
