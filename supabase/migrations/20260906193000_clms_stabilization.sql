@@ -399,20 +399,24 @@ BEGIN
         v_current_amount := COALESCE((v_item->>'currentAmount')::NUMERIC, (v_item->>'current_amount')::NUMERIC, 0);
         v_percentage := COALESCE((v_item->>'percentage')::NUMERIC, NULL);
 
-        -- Acquire exclusive row lock on po_site to prevent concurrent overdraft
-        SELECT ps.authorized_amount,
-               COALESCE(SUM(csa.current_amount) FILTER (WHERE c.status = 'ISSUED'), 0)::NUMERIC(18, 2)
-        INTO v_authorized_amount, v_previously_certified
-        FROM public.po_sites ps
-        LEFT JOIN public.certificate_site_allocations csa ON csa.po_site_id = ps.id
-        LEFT JOIN public.certificates c ON c.id = csa.certificate_id AND c.status != 'VOIDED'
-        WHERE ps.id = v_po_site_id AND ps.po_id = p_po_id
-        GROUP BY ps.id, ps.authorized_amount
-        FOR UPDATE OF ps;
+        -- 1. Acquire exclusive row lock on po_site to prevent concurrent overdraft (no GROUP BY)
+        SELECT authorized_amount
+        INTO v_authorized_amount
+        FROM public.po_sites
+        WHERE id = v_po_site_id AND po_id = p_po_id
+        FOR UPDATE;
 
         IF NOT FOUND THEN
             RAISE EXCEPTION 'PO-Site allocation % does not belong to PO %.', v_po_site_id, p_po_id;
         END IF;
+
+        -- 2. Calculate previously certified amount from issued certificates
+        SELECT COALESCE(SUM(csa.current_amount), 0)::NUMERIC(18, 2)
+        INTO v_previously_certified
+        FROM public.certificate_site_allocations csa
+        JOIN public.certificates c ON c.id = csa.certificate_id
+        WHERE csa.po_site_id = v_po_site_id
+          AND c.status = 'ISSUED';
 
         v_remaining_balance := v_authorized_amount - v_previously_certified;
 
