@@ -23,8 +23,10 @@ ALTER TABLE public.audit_events ADD COLUMN IF NOT EXISTS new_state JSONB;
 -- 3. Notifications Drift Resolution (safe default for type)
 ALTER TABLE public.notifications ALTER COLUMN type SET DEFAULT 'IN_APP';
 
--- 4. Invoices Drift Resolution (explicit submitted_at tracking)
+-- 4. Invoices & PO Schema Drift Resolution
 ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
+ALTER TABLE public.purchase_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.sites ALTER COLUMN region DROP NOT NULL;
 
 -- 5. Atomic Commercial Package Ingestion Transaction
 CREATE OR REPLACE FUNCTION public.ingest_commercial_package_atomic(
@@ -143,8 +145,7 @@ BEGIN
         currency,
         authorized_amount,
         payment_terms_days,
-        created_at,
-        updated_at
+        created_at
     ) VALUES (
         v_package_id,
         trim(p_po_number),
@@ -152,7 +153,6 @@ BEGIN
         p_currency,
         p_authorized_amount,
         COALESCE(p_payment_terms_days, 30),
-        now(),
         now()
     ) RETURNING id INTO v_po_id;
 
@@ -161,7 +161,7 @@ BEGIN
     LOOP
         v_site_ext := trim(v_site_elem->>'siteIdExt');
         v_site_name := trim(COALESCE(v_site_elem->>'siteName', ''));
-        v_region := NULLIF(trim(COALESCE(v_site_elem->>'region', '')), '');
+        v_region := COALESCE(NULLIF(trim(COALESCE(v_site_elem->>'region', '')), ''), 'General');
         v_site_amount := (v_site_elem->>'authorizedAmount')::NUMERIC;
         v_scope := NULLIF(trim(COALESCE(v_site_elem->>'scopeDescription', '')), '');
 
