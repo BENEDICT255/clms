@@ -9,15 +9,18 @@ import {
   CertificateRecord,
 } from '@/infrastructure/repositories/CertificateRepository';
 import { CreateInvoiceModal } from '../invoices/CreateInvoiceModal';
+import { CertificatePreviewModal } from '../certificates/CertificatePreviewModal';
 import { useAuth } from '@/app/providers/AuthContext';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Eye } from 'lucide-react';
 
 export function SupplierCertificatesPage() {
   const { user } = useAuth();
   const [certificates, setCertificates] = useState<CertificateRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedCert, setSelectedCert] = useState<CertificateRecord | null>(null);
+  const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
 
   const fetchCertificates = useCallback(async () => {
     setIsLoading(true);
@@ -44,8 +47,38 @@ export function SupplierCertificatesPage() {
     setIsInvoiceModalOpen(true);
   };
 
+  const handleOpenPreview = (cert: CertificateRecord) => {
+    setPreviewCert(cert);
+    setIsPreviewModalOpen(true);
+  };
+
   const columns: Column<CertificateRecord>[] = [
-    { header: 'Certificate No', accessorKey: 'certificateNumber', width: '160px' },
+    {
+      header: 'Certificate No',
+      width: '160px',
+      cell: (row) => (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleOpenPreview(row);
+          }}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            color: 'var(--color-brand-primary)',
+            fontWeight: 'var(--font-weight-semibold)',
+            cursor: 'pointer',
+            textDecoration: 'underline',
+            fontSize: 'inherit',
+            fontFamily: 'inherit',
+          }}
+        >
+          {row.certificateNumber}
+        </button>
+      ),
+    },
     { header: 'Type', accessorKey: 'certType', width: '90px' },
     { header: 'PO Reference', accessorKey: 'poNumber', width: '140px' },
     { header: 'Sites', accessorKey: 'siteCount', align: 'center', width: '80px' },
@@ -69,15 +102,31 @@ export function SupplierCertificatesPage() {
     {
       header: 'Action',
       align: 'center',
-      width: '140px',
+      width: '240px',
       cell: (row) => (
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => handleOpenCreateInvoice(row)}
-        >
-          Create Invoice
-        </Button>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'center' }}>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Eye size={14} />}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenPreview(row);
+            }}
+          >
+            View Certificate
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenCreateInvoice(row);
+            }}
+          >
+            Create Invoice
+          </Button>
+        </div>
       ),
     },
   ];
@@ -100,13 +149,33 @@ export function SupplierCertificatesPage() {
         }
       />
 
-      <DataTable
-        columns={columns}
-        data={certificates}
-        isLoading={isLoading}
-        emptyTitle="No certificates are currently available"
-        emptyDescription="Issued acceptance certificates published by the Projects team will appear here for invoice creation."
-      />
+      <div style={{ cursor: 'pointer' }}>
+        <DataTable
+          columns={columns}
+          data={certificates}
+          isLoading={isLoading}
+          onRowClick={handleOpenPreview}
+          emptyTitle="No certificates are currently available"
+          emptyDescription="Issued acceptance certificates published by the Projects team will appear here for invoice creation."
+        />
+      </div>
+
+      {isPreviewModalOpen && previewCert && (
+        <CertificatePreviewModal
+          isOpen={isPreviewModalOpen}
+          onClose={() => {
+            setIsPreviewModalOpen(false);
+            setPreviewCert(null);
+          }}
+          certificate={previewCert}
+          onUpdate={() => {
+            fetchCertificates();
+            certificateRepository.getCertificateById(previewCert.id).then((c) => {
+              if (c) setPreviewCert(c);
+            });
+          }}
+        />
+      )}
 
       {isInvoiceModalOpen && selectedCert && (
         <CreateInvoiceModal

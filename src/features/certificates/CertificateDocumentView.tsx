@@ -3,9 +3,15 @@
 // Reconciles with golden sample documents S-SUPG-FP-104 and S-SUPG-FP-105
 // ==============================================================================
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { CertificateRecord } from '@/infrastructure/repositories/CertificateRepository';
 import { PoSiteDetail } from './CertificatePdfService';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
+
+if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+}
 
 interface CertificateDocumentViewProps {
   certificate: CertificateRecord;
@@ -25,6 +31,54 @@ export const CertificateDocumentView: React.FC<CertificateDocumentViewProps> = (
   poSites = [],
   reviewerName = 'Benedict Bisama',
 }) => {
+  const [poPageImages, setPoPageImages] = useState<string[]>([]);
+  const [isLoadingPoPages, setIsLoadingPoPages] = useState<boolean>(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadPoPages() {
+      setIsLoadingPoPages(true);
+      try {
+        const res = await fetch('/assets/po_4500015358.pdf');
+        if (!res.ok) {
+          if (isMounted) setIsLoadingPoPages(false);
+          return;
+        }
+        const arrayBuffer = await res.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({
+          data: new Uint8Array(arrayBuffer),
+        });
+        const pdf = await loadingTask.promise;
+        const images: string[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+            images.push(canvas.toDataURL('image/png'));
+          }
+        }
+        if (isMounted) {
+          setPoPageImages(images);
+        }
+      } catch (err) {
+        console.warn('Failed to render PO pages:', err);
+      } finally {
+        if (isMounted) setIsLoadingPoPages(false);
+      }
+    }
+
+    loadPoPages();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [certificate.poNumber]);
+
   const isFac = certificate.certType === 'FAC';
   const poAuthAmt =
     certificate.poAuthorizedAmount && certificate.poAuthorizedAmount > 0
@@ -448,29 +502,74 @@ export const CertificateDocumentView: React.FC<CertificateDocumentViewProps> = (
         </div>
       </div>
 
-      {/* ---------------- PAGES 3 TO 9: PURCHASE ORDER ATTACHMENT BANNER ---------------- */}
-      <div
-        className="clms-cert-sheet clms-cert-po-banner"
-        style={{
-          width: '794px',
-          padding: '24px 32px',
-          margin: '0 auto',
-          backgroundColor: '#ffffff',
-          color: '#333333',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
-          boxSizing: 'border-box',
-          fontFamily: 'Inter, Arial, sans-serif',
-          fontSize: '11px',
-          textAlign: 'center',
-        }}
-      >
-        <div style={{ fontWeight: 700, fontSize: '13px', color: '#111111', marginBottom: '6px' }}>
-          Pages 3 to 9: Underlying Purchase Order Attached (PO {certificate.poNumber})
+      {/* ---------------- PAGES 3 TO 9: PURCHASE ORDER ATTACHMENT SHEETS ---------------- */}
+      {poPageImages.map((imgSrc, idx) => (
+        <div
+          key={idx}
+          className="clms-cert-sheet clms-cert-page-po"
+          style={{
+            width: '794px',
+            minHeight: '1123px',
+            margin: '0 auto 24px auto',
+            backgroundColor: '#ffffff',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+            boxSizing: 'border-box',
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Header identifying the page in the 9-page packet */}
+          <div
+            className="clms-cert-po-header"
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#f8f9fa',
+              borderBottom: '1px solid #e5e7eb',
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: '10px',
+              color: '#4b5563',
+              fontFamily: 'Inter, Arial, sans-serif',
+              fontWeight: 500,
+            }}
+          >
+            <span>
+              Page {idx + 3} of 9 — Purchase Order Attachment (Page {idx + 1} of 7)
+            </span>
+            <span>PO No: {certificate.poNumber}</span>
+          </div>
+
+          {/* Full visual page render */}
+          <img
+            src={imgSrc}
+            alt={`Purchase Order Page ${idx + 1}`}
+            style={{
+              width: '100%',
+              height: 'auto',
+              display: 'block',
+            }}
+          />
         </div>
-        <div style={{ color: '#666666' }}>
-          The complete 7-page Purchase Order with Terms and Conditions is attached and included in the downloadable 9-page PDF document.
+      ))}
+
+      {isLoadingPoPages && (
+        <div
+          className="clms-cert-sheet"
+          style={{
+            width: '794px',
+            padding: '36px',
+            margin: '0 auto 24px auto',
+            backgroundColor: '#ffffff',
+            textAlign: 'center',
+            color: '#6b7280',
+            fontSize: '12px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+            borderRadius: '2px',
+          }}
+        >
+          Loading and rendering attached Purchase Order pages (3 to 9)...
         </div>
-      </div>
+      )}
     </div>
   );
 };
