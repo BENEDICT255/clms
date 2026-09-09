@@ -458,6 +458,16 @@ export class CertificateRepository {
             .update({ status: 'ISSUED', issued_at: now, updated_at: now })
             .eq('id', certificateId);
           if (!updErr) {
+            void supabase.from('audit_events').insert({
+              entity_type: 'CERTIFICATE',
+              entity_id: certificateId,
+              action: 'CERTIFICATE_ISSUED',
+              new_state: {
+                certificate_id: certificateId,
+                status: 'ISSUED',
+                issued_at: now,
+              },
+            });
             return { success: true, issuedAt: now };
           }
         }

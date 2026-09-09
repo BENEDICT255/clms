@@ -26,6 +26,7 @@ export interface InvoiceCalculationInput {
   invoiceAmount: number;
   taxRatePercent?: number; // default e.g. 18% VAT if applicable
   existingInvoicedAmount?: number;
+  isInclusiveTax?: boolean; // When true, certified entitlement is the TOTAL GROSS claim (after tax)
 }
 
 export interface InvoiceCalculationResult {
@@ -50,13 +51,33 @@ export class InvoiceEngine {
       errors.push('Invoice amount must be greater than zero.');
     }
 
-    if (input.invoiceAmount > availableEntitlement) {
+    if (input.invoiceAmount > availableEntitlement + 0.01) {
       errors.push(
         `Invoice amount (${input.invoiceAmount.toLocaleString()}) exceeds valid invoiceable certified entitlement (${availableEntitlement.toLocaleString()}).`
       );
     }
 
     const taxRate = input.taxRatePercent !== undefined ? input.taxRatePercent : 18;
+
+    if (input.isInclusiveTax) {
+      // Entitlement is the TOTAL GROSS after-tax value. Back-calculate Net Base and VAT.
+      const totalPayable = input.invoiceAmount;
+      const baseAmount = Math.round((totalPayable / (1 + taxRate / 100)) * 100) / 100;
+      const taxAmount = Math.round((totalPayable - baseAmount) * 100) / 100;
+      const remainingEntitlement = Math.max(0, availableEntitlement - totalPayable);
+
+      return {
+        isValid: errors.length === 0,
+        baseAmount,
+        taxAmount,
+        totalPayable,
+        remainingEntitlement,
+        errors,
+        warnings,
+      };
+    }
+
+    // Standard tax-exclusive calculation
     const baseAmount = input.invoiceAmount;
     const taxAmount = Math.round((baseAmount * taxRate) / 100);
     const totalPayable = baseAmount + taxAmount;
@@ -71,6 +92,24 @@ export class InvoiceEngine {
       errors,
       warnings,
     };
+  }
+
+  /**
+   * Back-calculates net base amount and VAT from an authoritative certified gross entitlement.
+   * Total = Base + VAT, where Total === certifiedEntitlement.
+   */
+  public static calculateInclusiveInvoice(input: {
+    certifiedEntitlement: number;
+    taxRatePercent?: number;
+    existingInvoicedAmount?: number;
+  }): InvoiceCalculationResult {
+    return this.calculateInvoice({
+      certifiedEntitlement: input.certifiedEntitlement,
+      invoiceAmount: input.certifiedEntitlement,
+      taxRatePercent: input.taxRatePercent ?? 18,
+      ...(input.existingInvoicedAmount !== undefined ? { existingInvoicedAmount: input.existingInvoicedAmount } : {}),
+      isInclusiveTax: true,
+    });
   }
 
   public static canTransition(currentStatus: InvoiceStatus, targetStatus: InvoiceStatus): boolean {

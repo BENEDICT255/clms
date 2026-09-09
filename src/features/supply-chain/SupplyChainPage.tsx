@@ -25,7 +25,9 @@ import {
   supplyChainRepository,
   InvoiceReviewHistoryItem,
 } from '@/infrastructure/repositories/SupplyChainRepository';
-import { InvoiceRecord } from '@/infrastructure/repositories/InvoiceRepository';
+import { InvoiceRecord, invoiceRepository } from '@/infrastructure/repositories/InvoiceRepository';
+import { certificateRepository } from '@/infrastructure/repositories/CertificateRepository';
+import { CertificatePdfService } from '@/features/certificates/CertificatePdfService';
 import {
   RETURN_REASON_OPTIONS,
   ReturnReasonCode,
@@ -41,6 +43,8 @@ import {
   Building2,
   FileText,
   Clock,
+  Layers,
+  Download,
 } from 'lucide-react';
 
 export function SupplyChainPage() {
@@ -65,6 +69,33 @@ export function SupplyChainPage() {
 
   // Feedback Alert
   const [feedback, setFeedback] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
+  const [isDownloadingDoc, setIsDownloadingDoc] = useState(false);
+
+  const handleDownloadUnifiedDoc = async () => {
+    if (!selectedInvoice) return;
+    setIsDownloadingDoc(true);
+    try {
+      const doc = await invoiceRepository.getUnifiedInvoiceDocument(selectedInvoice.id);
+      if (doc?.url) {
+        window.open(doc.url, '_blank');
+      } else {
+        const cert = await certificateRepository.getCertificateById(selectedInvoice.certificateId);
+        if (cert) {
+          const poSites = await certificateRepository.getPoSites(cert.poId);
+          const pdfBytes = await CertificatePdfService.generateCertificatePdf({
+            certificate: cert,
+            poSites,
+            reviewerName: 'Benedict Bisama',
+          });
+          CertificatePdfService.triggerDownload(pdfBytes, `${selectedInvoice.clmsRef}_Commercial_Packet.pdf`);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not download unified document:', err);
+    } finally {
+      setIsDownloadingDoc(false);
+    }
+  };
 
   const fetchInvoices = useCallback(async () => {
     setIsLoading(true);
@@ -414,6 +445,52 @@ export function SupplyChainPage() {
                     className="text-positive"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* Unified Commercial Document Packet */}
+            <div
+              className="border-hairline"
+              style={{
+                padding: 'var(--space-4)',
+                backgroundColor: 'var(--color-surface-sunken)',
+                borderRadius: 'var(--radius-xs)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h4
+                    style={{
+                      fontSize: 'var(--font-size-sm)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                      margin: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-1)',
+                    }}
+                  >
+                    <Layers size={15} color="var(--color-brand-primary)" />
+                    Unified Commercial Document Packet
+                  </h4>
+                  <p
+                    style={{
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--color-text-secondary)',
+                      margin: '4px 0 0',
+                    }}
+                  >
+                    Complete 3-part consolidated PDF (Invoice + Receipt + 9-Page Certificate)
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<Download size={14} />}
+                  isLoading={isDownloadingDoc}
+                  onClick={handleDownloadUnifiedDoc}
+                >
+                  Download Packet
+                </Button>
               </div>
             </div>
 

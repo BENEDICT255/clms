@@ -17,7 +17,7 @@ import { BOQParser } from '@/domain/commercial/BOQParser';
 describe('Golden BOQ Parser Regression Test', () => {
   const filePath = path.resolve(
     process.cwd(),
-    'ACTULA/Site Improvement( Oversite Aggregates and Concrete ) BOQ-16sites-Prime power_Reviewed (1).xlsx'
+    'ACTULA/BOQ sample.xlsx'
   );
 
   it('verifies the golden file exists on disk', () => {

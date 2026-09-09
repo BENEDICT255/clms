@@ -17,7 +17,7 @@ import { POParser } from '@/domain/commercial/POParser';
 describe('Golden PO Parser Regression Test', () => {
   const filePath = path.resolve(
     process.cwd(),
-    'ACTULA/PO 4500015358 -16 Sites- Primepower.pdf'
+    'ACTULA/PO sample.pdf'
   );
 
   it('verifies the golden PO PDF exists on disk', () => {

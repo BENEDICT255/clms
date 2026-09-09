@@ -303,6 +303,20 @@ CREATE POLICY project_types_admin_write ON public.project_types
   USING (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')))
   WITH CHECK (public.is_internal_staff() AND (public.has_capability('config.manage') OR public.has_capability('package.import')));
 
+DROP POLICY IF EXISTS invoices_supplier_update ON public.invoices;
+CREATE POLICY invoices_supplier_update ON public.invoices
+  FOR UPDATE
+  TO authenticated
+  USING (
+    (public.get_user_supplier_id() IS NOT NULL AND supplier_id = public.get_user_supplier_id())
+    OR (public.is_internal_staff())
+  )
+  WITH CHECK (
+    (public.get_user_supplier_id() IS NOT NULL AND supplier_id = public.get_user_supplier_id())
+    OR (public.is_internal_staff())
+  );
+
+
 -- ==============================================================================
 -- 8. Reconciled Certification RPCs (Prompt Section 24 & Section 31)
 -- ==============================================================================
@@ -681,6 +695,326 @@ GRANT EXECUTE ON FUNCTION public.issue_certificate(UUID) TO authenticated;
 
 REVOKE EXECUTE ON FUNCTION public.issue_certificate(UUID, UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.issue_certificate(UUID, UUID) TO authenticated;
+
+-- ==============================================================================
+-- 9. Commercial Invoice Creation & Submission (Reconciled Contract & Parameters)
+-- ==============================================================================
+
+-- 9.1 Create Commercial Invoice from Certificate
+CREATE OR REPLACE FUNCTION public.create_invoice_from_certificate(
+    p_certificate_id UUID,
+    p_supplier_invoice_no TEXT,
+    p_amount NUMERIC(18, 2),
+    p_tax_amount NUMERIC(18, 2) DEFAULT 0,
+    p_notes TEXT DEFAULT '',
+    p_invoice_date DATE DEFAULT CURRENT_DATE
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_cert RECORD;
+    v_seq_num BIGINT;
+    v_clms_ref TEXT;
+    v_invoice_id UUID;
+    v_already_invoiced NUMERIC(18, 2);
+    v_actor_id UUID;
+    v_existing_inv RECORD;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        SELECT id INTO v_actor_id FROM public.users WHERE is_active = true LIMIT 1;
+    END IF;
+
+    -- Verify certificate is ISSUED and lock it
+    SELECT c.*, po.supplier_id, po.currency AS po_currency
+    INTO v_cert
+    FROM public.certificates c
+    JOIN public.purchase_orders po ON po.id = c.po_id
+    WHERE c.id = p_certificate_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Certificate with ID % not found.', p_certificate_id;
+    END IF;
+
+    IF v_cert.status != 'ISSUED' THEN
+        RAISE EXCEPTION 'Cannot invoice certificate with status %. Certificate must be ISSUED.', v_cert.status;
+    END IF;
+
+    -- Idempotency Check: If an unfinalized invoice already exists for this certificate,
+    -- update that exact record with the current legal invoice number and amounts instead of creating
+    -- duplicate conflicting records that trigger "cumulative invoiced exceeds certificate total".
+    SELECT id, clms_reference, status INTO v_existing_inv
+    FROM public.invoices
+    WHERE certificate_id = p_certificate_id
+      AND status IN ('DRAFT', 'SUBMITTED')
+    ORDER BY created_at DESC
+    LIMIT 1;
+
+    IF v_existing_inv.id IS NOT NULL THEN
+        -- Verify entitlement excluding the invoice being updated
+        SELECT COALESCE(SUM(amount + tax_amount), 0)::NUMERIC(18, 2) INTO v_already_invoiced
+        FROM public.invoices
+        WHERE certificate_id = p_certificate_id 
+          AND id != v_existing_inv.id
+          AND status NOT IN ('RETURNED', 'VOID', 'DRAFT', 'SUBMITTED');
+
+        IF (v_already_invoiced + p_amount + COALESCE(p_tax_amount, 0)) > (v_cert.total_amount + 0.05) THEN
+            RAISE EXCEPTION 'Invoice entitlement exceeded: cumulative invoiced (%) exceeds certificate total (%).',
+                (v_already_invoiced + p_amount + COALESCE(p_tax_amount, 0)), v_cert.total_amount;
+        END IF;
+
+        -- Update existing invoice record
+        UPDATE public.invoices
+        SET supplier_invoice_number = p_supplier_invoice_no,
+            invoice_date = p_invoice_date,
+            amount = p_amount,
+            tax_amount = p_tax_amount,
+            notes = p_notes,
+            status = 'DRAFT',
+            updated_at = now()
+        WHERE id = v_existing_inv.id;
+
+        -- Update or insert allocation
+        INSERT INTO public.invoice_allocations (invoice_id, certificate_id, allocated_amount)
+        VALUES (v_existing_inv.id, p_certificate_id, p_amount)
+        ON CONFLICT (invoice_id, certificate_id) DO UPDATE
+        SET allocated_amount = EXCLUDED.allocated_amount;
+
+        -- Append audit event
+        INSERT INTO public.audit_events (
+            entity_type, entity_id, action, actor_id, new_state, created_at
+        ) VALUES (
+            'INVOICE', v_existing_inv.id, 'INVOICE_UPDATED', v_actor_id,
+            jsonb_build_object(
+                'clms_reference', v_existing_inv.clms_reference,
+                'supplier_invoice_number', p_supplier_invoice_no,
+                'amount', p_amount,
+                'tax_amount', p_tax_amount,
+                'notes', p_notes
+            ),
+            now()
+        );
+
+        RETURN jsonb_build_object(
+            'success', true,
+            'invoice_id', v_existing_inv.id,
+            'clms_ref', v_existing_inv.clms_reference
+        );
+    END IF;
+
+    -- INVOICE ENTITLEMENT INVARIANT CHECK: Invoiced Total (Base + Tax) <= Certificate Total
+    SELECT COALESCE(SUM(amount + tax_amount), 0)::NUMERIC(18, 2) INTO v_already_invoiced
+    FROM public.invoices
+    WHERE certificate_id = p_certificate_id AND status NOT IN ('RETURNED', 'VOID', 'DRAFT');
+
+    IF (v_already_invoiced + p_amount + COALESCE(p_tax_amount, 0)) > (v_cert.total_amount + 0.05) THEN
+        RAISE EXCEPTION 'Invoice entitlement exceeded: cumulative invoiced (%) exceeds certificate total (%).',
+            (v_already_invoiced + p_amount + COALESCE(p_tax_amount, 0)), v_cert.total_amount;
+    END IF;
+
+    -- Generate atomic CLMS reference: INV-YY-XXXXX
+    v_seq_num := nextval('public.seq_invoice_clms_ref');
+    v_clms_ref := 'INV-' || to_char(now(), 'YY') || '-' || lpad(v_seq_num::TEXT, 5, '0');
+
+    -- Insert invoice in DRAFT
+    INSERT INTO public.invoices (
+        certificate_id,
+        supplier_id,
+        clms_reference,
+        supplier_invoice_number,
+        invoice_date,
+        amount,
+        tax_amount,
+        currency,
+        status
+    ) VALUES (
+        p_certificate_id,
+        v_cert.supplier_id,
+        v_clms_ref,
+        p_supplier_invoice_no,
+        p_invoice_date,
+        p_amount,
+        p_tax_amount,
+        v_cert.po_currency,
+        'DRAFT'
+    ) RETURNING id INTO v_invoice_id;
+
+    -- Insert allocation
+    INSERT INTO public.invoice_allocations (
+        invoice_id,
+        certificate_id,
+        allocated_amount
+    ) VALUES (
+        v_invoice_id,
+        p_certificate_id,
+        p_amount
+    );
+
+    -- Append audit event
+    INSERT INTO public.audit_events (
+        entity_type,
+        entity_id,
+        action,
+        actor_id,
+        new_state,
+        created_at
+    ) VALUES (
+        'INVOICE',
+        v_invoice_id,
+        'INVOICE_CREATED',
+        v_actor_id,
+        jsonb_build_object(
+            'clms_reference', v_clms_ref,
+            'supplier_invoice_number', p_supplier_invoice_no,
+            'amount', p_amount,
+            'tax_amount', p_tax_amount,
+            'notes', p_notes
+        ),
+        now()
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'invoice_id', v_invoice_id,
+        'clms_ref', v_clms_ref
+    );
+END;
+$$;
+
+-- Overload for legacy parameter signature (p_cert_id, p_supplier_id, ...)
+CREATE OR REPLACE FUNCTION public.create_invoice_from_certificate(
+    p_cert_id UUID,
+    p_supplier_id UUID,
+    p_supplier_invoice_no TEXT,
+    p_invoice_date DATE,
+    p_amount NUMERIC(18, 2),
+    p_tax_amount NUMERIC(18, 2) DEFAULT 0,
+    p_created_by UUID DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    RETURN public.create_invoice_from_certificate(
+        p_cert_id,
+        p_supplier_invoice_no,
+        p_amount,
+        p_tax_amount,
+        '',
+        COALESCE(p_invoice_date, CURRENT_DATE)
+    );
+END;
+$$;
+
+-- 9.2 Submit Commercial Invoice (Drop conflicting overloads and define single canonical signature)
+DROP FUNCTION IF EXISTS public.submit_supplier_invoice(UUID, UUID, UUID);
+DROP FUNCTION IF EXISTS public.submit_supplier_invoice(UUID, UUID);
+DROP FUNCTION IF EXISTS public.submit_supplier_invoice(UUID);
+
+CREATE OR REPLACE FUNCTION public.submit_supplier_invoice(
+    p_invoice_id UUID,
+    p_supplier_id UUID DEFAULT NULL,
+    p_submitted_by UUID DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_invoice RECORD;
+    v_scm_user RECORD;
+    v_actor_id UUID;
+BEGIN
+    v_actor_id := COALESCE(auth.uid(), p_submitted_by);
+    IF v_actor_id IS NULL THEN
+        SELECT id INTO v_actor_id FROM public.users WHERE is_active = true LIMIT 1;
+    END IF;
+
+    SELECT * INTO v_invoice
+    FROM public.invoices
+    WHERE id = p_invoice_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Invoice with ID % not found.', p_invoice_id;
+    END IF;
+
+    -- Idempotent check
+    IF v_invoice.status = 'SUBMITTED' THEN
+        RETURN jsonb_build_object('success', true, 'status', 'SUBMITTED', 'message', 'Invoice already submitted');
+    END IF;
+
+    IF v_invoice.status NOT IN ('DRAFT', 'RETURNED') THEN
+        RAISE EXCEPTION 'Cannot submit invoice with status %.', v_invoice.status;
+    END IF;
+
+    -- Update state to SUBMITTED
+    UPDATE public.invoices
+    SET status = 'SUBMITTED',
+        submitted_at = now(),
+        updated_at = now()
+    WHERE id = p_invoice_id;
+
+    -- Audit event
+    INSERT INTO public.audit_events (
+        entity_type,
+        entity_id,
+        action,
+        actor_id,
+        new_state,
+        created_at
+    ) VALUES (
+        'INVOICE',
+        p_invoice_id,
+        'INVOICE_SUBMITTED',
+        v_actor_id,
+        jsonb_build_object('clms_reference', v_invoice.clms_reference, 'status', 'SUBMITTED'),
+        now()
+    );
+
+    -- Notify Supply Chain queue
+    FOR v_scm_user IN
+        SELECT id FROM public.users
+        WHERE (role IN ('SUPPLY_CHAIN', 'SCM_SPECIALIST', 'ADMIN') OR public.has_capability('invoice.review.sc'))
+          AND is_active = true
+    LOOP
+        INSERT INTO public.notifications (user_id, type, title, message, entity_type, entity_id, created_at)
+        VALUES (
+            v_scm_user.id,
+            'IN_APP',
+            'Commercial Claim Submitted: ' || v_invoice.clms_reference,
+            'Supplier has submitted invoice ' || v_invoice.supplier_invoice_number || ' (' || v_invoice.clms_reference || ') against certificate for verification.',
+            'INVOICE',
+            p_invoice_id,
+            now()
+        );
+    END LOOP;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'invoice_id', p_invoice_id,
+        'status', 'SUBMITTED'
+    );
+END;
+$$;
+
+-- Permissions lockdown
+REVOKE EXECUTE ON FUNCTION public.create_invoice_from_certificate(UUID, TEXT, NUMERIC, NUMERIC, TEXT, DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_invoice_from_certificate(UUID, TEXT, NUMERIC, NUMERIC, TEXT, DATE) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.create_invoice_from_certificate(UUID, UUID, TEXT, DATE, NUMERIC, NUMERIC, UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_invoice_from_certificate(UUID, UUID, TEXT, DATE, NUMERIC, NUMERIC, UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.submit_supplier_invoice(UUID, UUID, UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.submit_supplier_invoice(UUID, UUID, UUID) TO authenticated;
+
 
 
 

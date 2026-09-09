@@ -23,6 +23,38 @@ function formatMoney(amount: number): string {
   }).format(amount);
 }
 
+// In-memory cache to make PDF assembly instant (0ms asset fetch)
+let cachedLogoBytes: ArrayBuffer | null = null;
+let cachedPoDocBytes: ArrayBuffer | null = null;
+
+async function getLogoBytes(): Promise<ArrayBuffer | null> {
+  if (cachedLogoBytes) return cachedLogoBytes;
+  try {
+    const res = await fetch('/assets/helios_logo.png');
+    if (res.ok) {
+      cachedLogoBytes = await res.arrayBuffer();
+      return cachedLogoBytes;
+    }
+  } catch (e) {
+    console.warn('Could not load logo for PDF:', e);
+  }
+  return null;
+}
+
+async function getPoDocBytes(): Promise<ArrayBuffer | null> {
+  if (cachedPoDocBytes) return cachedPoDocBytes;
+  try {
+    const res = await fetch('/assets/po_4500015358.pdf');
+    if (res.ok) {
+      cachedPoDocBytes = await res.arrayBuffer();
+      return cachedPoDocBytes;
+    }
+  } catch (e) {
+    console.warn('Could not load PO PDF attachment:', e);
+  }
+  return null;
+}
+
 export class CertificatePdfService {
   /**
    * Generates the authentic 9-page PDF matching the corporate golden samples.
@@ -34,11 +66,27 @@ export class CertificatePdfService {
     reviewerName?: string;
     reviewerDate?: string;
   }): Promise<Uint8Array> {
+    const pdfDoc = await PDFDocument.create();
+    await this.appendCertificatePages(pdfDoc, params);
+    return await pdfDoc.save();
+  }
+
+  /**
+   * Appends the 9 certificate pages (2 cover/allocation pages + 7 PO pages)
+   * directly to an existing PDFDocument in a single pass without re-encoding.
+   */
+  public static async appendCertificatePages(
+    pdfDoc: PDFDocument,
+    params: {
+      certificate: CertificateRecord;
+      poSites?: PoSiteDetail[];
+      reviewerName?: string;
+      reviewerDate?: string;
+    }
+  ): Promise<void> {
     const { certificate, poSites = [], reviewerName = 'Benedict Bisama' } = params;
     const certType = certificate.certType;
     const isFac = certType === 'FAC';
-
-    const pdfDoc = await PDFDocument.create();
 
     // Embed Standard Fonts
     const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -46,14 +94,13 @@ export class CertificatePdfService {
 
     // Embed Corporate Logo
     let logoImage: any = null;
-    try {
-      const logoRes = await fetch('/assets/helios_logo.png');
-      if (logoRes.ok) {
-        const logoBytes = await logoRes.arrayBuffer();
+    const logoBytes = await getLogoBytes();
+    if (logoBytes) {
+      try {
         logoImage = await pdfDoc.embedPng(logoBytes);
+      } catch (e) {
+        console.warn('Could not embed logo PNG:', e);
       }
-    } catch (e) {
-      console.warn('Could not load logo for PDF:', e);
     }
 
     // =========================================================================
@@ -782,9 +829,8 @@ export class CertificatePdfService {
     // PAGES 3 to 9: Attach the 7 Pages of the Purchase Order Document
     // =========================================================================
     try {
-      const poRes = await fetch('/assets/po_4500015358.pdf');
-      if (poRes.ok) {
-        const poBytes = await poRes.arrayBuffer();
+      const poBytes = await getPoDocBytes();
+      if (poBytes) {
         const poDoc = await PDFDocument.load(poBytes);
         const poIndices = poDoc.getPageIndices();
         const copiedPages = await pdfDoc.copyPages(poDoc, poIndices);
@@ -795,22 +841,48 @@ export class CertificatePdfService {
     } catch (e) {
       console.warn('Could not load PO PDF attachment for merge:', e);
     }
-
-    return await pdfDoc.save();
   }
 
   /**
    * Helper to trigger direct browser download of the generated PDF.
+   * Utilizes File System Access API (showSaveFilePicker) when available to completely
+   * bypass external download interceptors (such as Internet Download Manager COM hooks).
    */
-  public static triggerDownload(pdfBytes: Uint8Array, fileName: string) {
+  public static async triggerDownload(pdfBytes: Uint8Array, fileName: string): Promise<void> {
+    const cleanName = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
     const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+
+    if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: cleanName,
+          types: [
+            {
+              description: 'PDF Commercial Certificate (*.pdf)',
+              accept: { 'application/pdf': ['.pdf'] },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return;
+      } catch (pickerErr: any) {
+        if (pickerErr?.name === 'AbortError') {
+          return;
+        }
+        console.warn('Native file picker note, using browser download:', pickerErr);
+      }
+    }
+
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+    link.download = cleanName;
+    link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 }

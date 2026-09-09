@@ -33,11 +33,11 @@ import { ExtractedBOQResult, ExtractedPOResult } from '@/domain/commercial/types
 describe('Ingestion Golden Path & Negative Security Gates', () => {
   const boqPath = path.resolve(
     process.cwd(),
-    'ACTULA/Site Improvement( Oversite Aggregates and Concrete ) BOQ-16sites-Prime power_Reviewed (1).xlsx'
+    'ACTULA/BOQ sample.xlsx'
   );
   const poPath = path.resolve(
     process.cwd(),
-    'ACTULA/PO 4500015358 -16 Sites- Primepower.pdf'
+    'ACTULA/PO sample.pdf'
   );
 
   it('Section 45: Golden Ingestion Path with exact matching fixtures', async () => {

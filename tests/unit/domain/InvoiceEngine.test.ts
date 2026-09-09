@@ -80,4 +80,22 @@ describe('InvoiceEngine Financial Invariants', () => {
     // SETTLED is terminal
     expect(InvoiceEngine.canTransition('SETTLED', 'DRAFT')).toBe(false);
   });
+
+  it('correctly back-calculates net base and 18% VAT without double-taxation (calculateInclusiveInvoice)', () => {
+    // Exact figure from user's commercial certificate: 15,300,898.36
+    const totalEntitlement = 15_300_898.36;
+    const result = InvoiceEngine.calculateInclusiveInvoice({
+      certifiedEntitlement: totalEntitlement,
+      taxRatePercent: 18,
+    });
+
+    expect(result.isValid).toBe(true);
+    // Base amount = 15,300,898.36 / 1.18 = 12,966,863.02
+    expect(result.baseAmount).toBe(12_966_863.02);
+    // VAT amount = 15,300,898.36 - 12,966,863.02 = 2,334,035.34
+    expect(result.taxAmount).toBe(2_334_035.34);
+    // Total payable matches the exact certified entitlement without double-taxation
+    expect(result.totalPayable).toBe(15_300_898.36);
+    expect(result.baseAmount + result.taxAmount).toBeCloseTo(result.totalPayable, 2);
+  });
 });
