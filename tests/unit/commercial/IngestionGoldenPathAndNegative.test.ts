@@ -31,14 +31,17 @@ import { canConfirmCommercialPackage } from '@/application/services/IngestionSer
 import { ExtractedBOQResult, ExtractedPOResult } from '@/domain/commercial/types';
 
 describe('Ingestion Golden Path & Negative Security Gates', () => {
-  const boqPath = path.resolve(
-    process.cwd(),
-    'ACTULA/BOQ sample.xlsx'
-  );
-  const poPath = path.resolve(
-    process.cwd(),
-    'ACTULA/PO sample.pdf'
-  );
+  const boqCandidates = [
+    path.resolve(process.cwd(), 'ACTULA/Site Improvement( Oversite Aggregates and Concrete ) BOQ-16sites-Prime power_Reviewed (1).xlsx'),
+    path.resolve(process.cwd(), 'ACTULA/BOQ sample.xlsx'),
+  ];
+  const boqPath = boqCandidates.find((p) => fs.existsSync(p)) || boqCandidates[0];
+
+  const poCandidates = [
+    path.resolve(process.cwd(), 'ACTULA/PO 4500015358 -16 Sites- Primepower.pdf'),
+    path.resolve(process.cwd(), 'ACTULA/PO sample.pdf'),
+  ];
+  const poPath = poCandidates.find((p) => fs.existsSync(p)) || poCandidates[0];
 
   it('Section 45: Golden Ingestion Path with exact matching fixtures', async () => {
     const boqBuffer = fs.readFileSync(boqPath);

@@ -95,4 +95,23 @@ describe('AgingEngine — Due Date & Aging Bracket Calculations', () => {
     expect(res.agingBucket).toBe('SETTLED');
     expect(res.bucketLabel).toBe('Settled');
   });
+
+  it('flags missing or null payment terms as REQUIRES_REVIEW and does NOT invent 30 days', () => {
+    const resUndefined = AgingEngine.evaluateAging({
+      baselineDate: '2026-01-01',
+      paymentTermsDays: undefined,
+      outstandingBalance: 5_000_000,
+    });
+    expect(resUndefined.dueDate).toBeNull();
+    expect(resUndefined.agingBucket).toBe('REQUIRES_REVIEW');
+    expect(resUndefined.isOverdue).toBe(false);
+
+    const resNull = AgingEngine.evaluateAging({
+      baselineDate: '2026-01-01',
+      paymentTermsDays: null,
+      outstandingBalance: 5_000_000,
+    });
+    expect(resNull.dueDate).toBeNull();
+    expect(resNull.agingBucket).toBe('REQUIRES_REVIEW');
+  });
 });

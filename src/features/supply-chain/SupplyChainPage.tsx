@@ -27,7 +27,11 @@ import {
 } from '@/infrastructure/repositories/SupplyChainRepository';
 import { InvoiceRecord, invoiceRepository } from '@/infrastructure/repositories/InvoiceRepository';
 import { certificateRepository } from '@/infrastructure/repositories/CertificateRepository';
-import { CertificatePdfService } from '@/features/certificates/CertificatePdfService';
+import { CertificatePacketService } from '@/application/services/CertificatePacketService';
+import { downloadService } from '@/application/services/DownloadService';
+import { documentStorageService } from '@/infrastructure/storage/DocumentStorageService';
+import { InvoicePreviewModal } from '@/features/invoices/InvoicePreviewModal';
+import { useAuth } from '@/app/providers/AuthContext';
 import {
   RETURN_REASON_OPTIONS,
   ReturnReasonCode,
@@ -48,10 +52,12 @@ import {
 } from 'lucide-react';
 
 export function SupplyChainPage() {
+  const { user } = useAuth();
   const [pendingInvoices, setPendingInvoices] = useState<InvoiceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isPacketModalOpen, setIsPacketModalOpen] = useState(false);
   const [reviewHistory, setReviewHistory] = useState<InvoiceReviewHistoryItem[]>([]);
 
   // Return Modal State
@@ -71,23 +77,29 @@ export function SupplyChainPage() {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
   const [isDownloadingDoc, setIsDownloadingDoc] = useState(false);
 
+  /**
+   * IDM-independent Blob download using DownloadService (Section 17 & 18).
+   * Zero hardcoded reviewer/commercial data (Section 11, 50, 51).
+   */
   const handleDownloadUnifiedDoc = async () => {
     if (!selectedInvoice) return;
     setIsDownloadingDoc(true);
     try {
       const doc = await invoiceRepository.getUnifiedInvoiceDocument(selectedInvoice.id);
-      if (doc?.url) {
-        window.open(doc.url, '_blank');
+      if (doc) {
+        const blob = await documentStorageService.downloadBlob(doc.storagePath);
+        downloadService.downloadBlob(blob, `${selectedInvoice.clmsRef}_Submitted_Packet.pdf`);
       } else {
         const cert = await certificateRepository.getCertificateById(selectedInvoice.certificateId);
         if (cert) {
           const poSites = await certificateRepository.getPoSites(cert.poId);
-          const pdfBytes = await CertificatePdfService.generateCertificatePdf({
+          const certResult = await CertificatePacketService.generateCertificatePacket({
             certificate: cert,
             poSites,
-            reviewerName: 'Benedict Bisama',
+            approverName: user?.fullName,
           });
-          CertificatePdfService.triggerDownload(pdfBytes, `${selectedInvoice.clmsRef}_Commercial_Packet.pdf`);
+          const blob = new Blob([certResult.pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+          downloadService.downloadBlob(blob, `${selectedInvoice.clmsRef}_Certificate_Packet.pdf`);
         }
       }
     } catch (err) {
@@ -482,15 +494,25 @@ export function SupplyChainPage() {
                     Complete 3-part consolidated PDF (Invoice + Receipt + 9-Page Certificate)
                   </p>
                 </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={<Download size={14} />}
-                  isLoading={isDownloadingDoc}
-                  onClick={handleDownloadUnifiedDoc}
-                >
-                  Download Packet
-                </Button>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={<Eye size={14} />}
+                    onClick={() => setIsPacketModalOpen(true)}
+                  >
+                    View Packet
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Download size={14} />}
+                    isLoading={isDownloadingDoc}
+                    onClick={handleDownloadUnifiedDoc}
+                  >
+                    Download
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -783,6 +805,15 @@ export function SupplyChainPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Authoritative Submitted Invoice Packet Viewer Modal (Section 28) */}
+      {selectedInvoice && isPacketModalOpen && (
+        <InvoicePreviewModal
+          isOpen={isPacketModalOpen}
+          onClose={() => setIsPacketModalOpen(false)}
+          invoice={selectedInvoice}
+        />
+      )}
     </div>
   );
 }

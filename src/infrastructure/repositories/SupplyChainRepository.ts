@@ -96,7 +96,9 @@ export class SupplyChainRepository {
         return {
           id: row.id,
           clmsRef: row.clms_reference,
+          clmsReference: row.clms_reference,
           supplierInvoiceNo: row.supplier_invoice_number || '—',
+          supplierInvoiceNumber: row.supplier_invoice_number || '—',
           certificateId: cert?.id || row.certificate_id,
           certificateNumber: cert?.certificate_number || '—',
           certType: cert?.cert_type || 'FAC',
@@ -109,6 +111,7 @@ export class SupplyChainRepository {
           taxAmount: taxAmount,
           totalAmount: baseAmount + taxAmount,
           status: row.status as InvoiceRecord['status'],
+          invoiceDate: row.created_at,
           submittedAt: row.submitted_at || row.created_at,
           createdAt: row.created_at,
         };
@@ -121,7 +124,6 @@ export class SupplyChainRepository {
 
   /**
    * Approves an invoice and hands it off to Finance.
-   * Executes public.approve_invoice_supply_chain RPC with defensive fallback.
    */
   public async approveInvoice(
     invoiceId: string,
@@ -140,22 +142,12 @@ export class SupplyChainRepository {
         p_notes: notes ?? null,
       });
 
-      if (!error && data && data.success) {
-        return { success: true };
+      if (error) {
+        return { success: false, error: error.message };
       }
 
-      if (error) {
-        const isRpcUnavailable =
-          error.message.includes('schema cache') ||
-          error.message.includes('Could not find the function') ||
-          error.code === 'PGRST202' ||
-          error.code === '42883';
-
-        if (isRpcUnavailable) {
-          console.warn('RPC approve_invoice_supply_chain unavailable, executing direct authorized fallback:', error.message);
-          return await this.approveInvoiceDirectFallback(invoiceId, reviewerId, notes);
-        }
-        return { success: false, error: error.message };
+      if (data && data.success) {
+        return { success: true };
       }
 
       return { success: false, error: 'Supply Chain approval failed: unexpected response from database.' };
@@ -166,80 +158,7 @@ export class SupplyChainRepository {
   }
 
   /**
-   * Defensive fallback executing identical Supply Chain approval invariants
-   * when database schema cache is reloading.
-   */
-  private async approveInvoiceDirectFallback(
-    invoiceId: string,
-    reviewerId?: string,
-    notes?: string
-  ): Promise<{ success: boolean; error?: string }> {
-    try {
-      const { data: inv, error: fetchErr } = await supabase
-        .from('invoices')
-        .select('id, status, clms_reference, supplier_invoice_number')
-        .eq('id', invoiceId)
-        .single();
-
-      if (fetchErr || !inv) {
-        return { success: false, error: `Invoice not found: ${fetchErr?.message || 'unknown'}` };
-      }
-
-      if (inv.status === 'SC_APPROVED') {
-        return { success: true };
-      }
-
-      if (!['SUBMITTED', 'RESUBMITTED'].includes(inv.status)) {
-        return { success: false, error: `Cannot approve invoice with status ${inv.status}; must be SUBMITTED or RESUBMITTED.` };
-      }
-
-      const now = new Date().toISOString();
-      const { error: updErr } = await supabase
-        .from('invoices')
-        .update({
-          status: 'SC_APPROVED',
-          sc_approved_by: reviewerId ?? null,
-          sc_approved_at: now,
-          updated_at: now,
-        })
-        .eq('id', invoiceId);
-
-      if (updErr) {
-        return { success: false, error: updErr.message };
-      }
-
-      // Record in invoice_reviews history
-      await supabase.from('invoice_reviews').insert({
-        invoice_id: invoiceId,
-        reviewer_id: reviewerId ?? null,
-        decision: 'APPROVED',
-        reason: notes || 'Approved by Supply Chain verification',
-      });
-
-      // Record append-only audit event
-      await supabase.from('audit_events').insert({
-        entity_type: 'INVOICE',
-        entity_id: invoiceId,
-        action: 'INVOICE_SC_APPROVED',
-        actor_id: reviewerId ?? null,
-        new_state: {
-          clms_reference: inv.clms_reference,
-          supplier_invoice_number: inv.supplier_invoice_number,
-          status: 'SC_APPROVED',
-          notes: notes ?? null,
-        },
-      });
-
-      return { success: true };
-    } catch (fallbackErr: unknown) {
-      const msg = fallbackErr instanceof Error ? fallbackErr.message : 'Fallback approval failed';
-      return { success: false, error: msg };
-    }
-  }
-
-  /**
    * Returns an invoice to the supplier with structured reason code and comment.
-   * Executes public.return_supplier_invoice RPC with defensive fallback.
    */
   public async returnInvoice(
     invoiceId: string,
@@ -260,99 +179,17 @@ export class SupplyChainRepository {
         p_reason: reason,
       });
 
-      if (!error && data && data.success) {
-        return { success: true };
+      if (error) {
+        return { success: false, error: error.message };
       }
 
-      if (error) {
-        const isRpcUnavailable =
-          error.message.includes('schema cache') ||
-          error.message.includes('Could not find the function') ||
-          error.code === 'PGRST202' ||
-          error.code === '42883';
-
-        if (isRpcUnavailable) {
-          console.warn('RPC return_supplier_invoice unavailable, executing direct authorized fallback:', error.message);
-          return await this.returnInvoiceDirectFallback(invoiceId, returnCode, reason, reviewerId);
-        }
-        return { success: false, error: error.message };
+      if (data && data.success) {
+        return { success: true };
       }
 
       return { success: false, error: 'Invoice return failed: unexpected response from database.' };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error returning invoice';
-      return { success: false, error: msg };
-    }
-  }
-
-  /**
-   * Defensive fallback executing identical invoice return invariants
-   * when database schema cache is reloading.
-   */
-  private async returnInvoiceDirectFallback(
-    invoiceId: string,
-    returnCode: string,
-    reason: string,
-    reviewerId?: string
-  ): Promise<{ success: boolean; error?: string }> {
-    try {
-      if (!reason || !reason.trim()) {
-        return { success: false, error: 'A detailed explanatory reason is mandatory when returning an invoice.' };
-      }
-
-      const { data: inv, error: fetchErr } = await supabase
-        .from('invoices')
-        .select('id, status, clms_reference')
-        .eq('id', invoiceId)
-        .single();
-
-      if (fetchErr || !inv) {
-        return { success: false, error: `Invoice not found: ${fetchErr?.message || 'unknown'}` };
-      }
-
-      if (!['SUBMITTED', 'RESUBMITTED'].includes(inv.status)) {
-        return { success: false, error: `Cannot return invoice with status ${inv.status}; must be SUBMITTED or RESUBMITTED.` };
-      }
-
-      const now = new Date().toISOString();
-      const { error: updErr } = await supabase
-        .from('invoices')
-        .update({
-          status: 'RETURNED',
-          updated_at: now,
-        })
-        .eq('id', invoiceId);
-
-      if (updErr) {
-        return { success: false, error: updErr.message };
-      }
-
-      // Record in invoice_reviews history
-      await supabase.from('invoice_reviews').insert({
-        invoice_id: invoiceId,
-        reviewer_id: reviewerId ?? null,
-        decision: 'RETURNED',
-        return_code: returnCode,
-        reason: reason,
-      });
-
-      // Record append-only audit event
-      await supabase.from('audit_events').insert({
-        entity_type: 'INVOICE',
-        entity_id: invoiceId,
-        action: 'INVOICE_RETURNED',
-        actor_id: reviewerId ?? null,
-        new_state: {
-          clms_reference: inv.clms_reference,
-          status: 'RETURNED',
-          return_code: returnCode,
-          reason: reason,
-        },
-      });
-
-      return { success: true };
-    } catch (fallbackErr: unknown) {
-      const msg = fallbackErr instanceof Error ? fallbackErr.message : 'Fallback return failed';
       return { success: false, error: msg };
     }
   }

@@ -328,20 +328,22 @@ export class CertificateRepository {
     certType: CertificateType,
     certNumber: string
   ): Promise<{ success: boolean; url?: string | undefined; documentId?: string | undefined; error?: string | undefined }> {
+    let stagedStoragePath: string | null = null;
     try {
-      const ext = file.name.split('.').pop() || 'pdf';
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf';
       const cleanCertNum = certNumber.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const storagePath = `certificates/signed/${cleanCertNum}_signed_${Date.now()}.${ext}`;
+      stagedStoragePath = `certificates/${certificateId}/signed/${cleanCertNum}_signed.${ext}`;
 
+      // 1. Strict storage upload: must succeed
       const { error: uploadErr } = await supabase.storage
         .from('commercial-documents')
-        .upload(storagePath, file, { upsert: true, contentType: file.type || 'application/pdf' });
+        .upload(stagedStoragePath, file, { upsert: true, contentType: file.type || 'application/pdf' });
 
       if (uploadErr) {
-        console.warn('Storage upload error (continuing with record):', uploadErr.message);
+        return { success: false, error: `Failed to upload signed certificate to storage: ${uploadErr.message}` };
       }
 
-      // Compute sha256
+      // 2. Compute cryptographic SHA-256 hash
       const buffer = await file.arrayBuffer();
       const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -349,6 +351,7 @@ export class CertificateRepository {
 
       const docType = certType === 'PAC' ? 'PAC_CERT' : 'FAC_CERT';
 
+      // 3. Insert metadata record in commercial_documents
       const { data: docData, error: docErr } = await supabase
         .from('commercial_documents')
         .insert({
@@ -356,7 +359,7 @@ export class CertificateRepository {
           entity_type: 'CERTIFICATE',
           entity_id: certificateId,
           storage_bucket: 'commercial-documents',
-          storage_path: storagePath,
+          storage_path: stagedStoragePath,
           file_name: file.name,
           file_size: file.size,
           mime_type: file.type || 'application/pdf',
@@ -367,13 +370,15 @@ export class CertificateRepository {
         .single();
 
       if (docErr) {
-        console.warn('Commercial document insert warning:', docErr.message);
+        // Rollback staged storage object on DB metadata failure (Section 9)
+        await supabase.storage.from('commercial-documents').remove([stagedStoragePath]);
+        return { success: false, error: `Failed to register signed certificate document metadata: ${docErr.message}. Staged file was cleaned up.` };
       }
 
       let signedUrl: string | undefined;
       const { data: signedUrlData } = await supabase.storage
         .from('commercial-documents')
-        .createSignedUrl(storagePath, 3600);
+        .createSignedUrl(stagedStoragePath, 3600);
       if (signedUrlData) {
         signedUrl = signedUrlData.signedUrl;
       }
@@ -384,13 +389,17 @@ export class CertificateRepository {
         url: signedUrl,
       };
     } catch (err: unknown) {
+      if (stagedStoragePath) {
+        await supabase.storage.from('commercial-documents').remove([stagedStoragePath]).catch(() => {});
+      }
       const msg = err instanceof Error ? err.message : 'Upload failed';
       return { success: false, error: msg };
     }
   }
 
   /**
-   * Retrieves any signed certificate documents associated with this certificate.
+   * Retrieves authoritative signed certificate documents associated with this certificate (Section 10).
+   * Explicitly excludes unsigned drafts or other non-certificate documents.
    */
   public async getSignedCertificate(certificateId: string): Promise<{
     id: string;
@@ -405,6 +414,7 @@ export class CertificateRepository {
         .select('*')
         .eq('entity_type', 'CERTIFICATE')
         .eq('entity_id', certificateId)
+        .in('document_type', ['FAC_CERT', 'PAC_CERT', 'DPC_CERT', 'SIGNED_INVOICE'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -433,7 +443,7 @@ export class CertificateRepository {
 
   /**
    * Issues the certificate to the supplier.
-   * Executes public.issue_certificate RPC with defensive fallback.
+   * Executes public.issue_certificate RPC with zero unsafe direct-mutation fallbacks (Section 8).
    */
   public async issueCertificate(
     certificateId: string
@@ -444,32 +454,16 @@ export class CertificateRepository {
       });
 
       if (error) {
-        // Defensive check: If PostgREST schema cache hasn't reloaded the RPC,
-        // fall back to direct authorized state transition to prevent user blockage.
         if (
           error.message.includes('schema cache') ||
           error.message.includes('Could not find the function') ||
-          error.code === 'PGRST202'
+          error.code === 'PGRST202' ||
+          error.code === '42883'
         ) {
-          console.warn('RPC schema cache refresh pending, applying direct authorized state transition');
-          const now = new Date().toISOString();
-          const { error: updErr } = await supabase
-            .from('certificates')
-            .update({ status: 'ISSUED', issued_at: now, updated_at: now })
-            .eq('id', certificateId);
-          if (!updErr) {
-            void supabase.from('audit_events').insert({
-              entity_type: 'CERTIFICATE',
-              entity_id: certificateId,
-              action: 'CERTIFICATE_ISSUED',
-              new_state: {
-                certificate_id: certificateId,
-                status: 'ISSUED',
-                issued_at: now,
-              },
-            });
-            return { success: true, issuedAt: now };
-          }
+          return {
+            success: false,
+            error: 'ENVIRONMENT_SCHEMA_MISMATCH: Database function issue_certificate is unavailable. Mutation blocked.',
+          };
         }
         return { success: false, error: error.message };
       }

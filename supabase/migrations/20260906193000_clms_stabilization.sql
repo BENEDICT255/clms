@@ -30,6 +30,15 @@ ALTER TABLE public.sites ALTER COLUMN region DROP NOT NULL;
 ALTER TABLE public.certificates ADD COLUMN IF NOT EXISTS notes TEXT;
 ALTER TABLE public.certificate_site_allocations ADD COLUMN IF NOT EXISTS percentage NUMERIC(5, 2);
 
+-- Section 6: Allow NULL payment terms when not extractable (no forced 30 days)
+ALTER TABLE public.purchase_orders ALTER COLUMN payment_terms_days DROP DEFAULT;
+ALTER TABLE public.purchase_orders ALTER COLUMN payment_terms_days DROP NOT NULL;
+
+-- Section 21 & 27: Expand commercial document types for supporting documents and submission packets
+ALTER TABLE public.commercial_documents DROP CONSTRAINT IF EXISTS commercial_documents_document_type_check;
+ALTER TABLE public.commercial_documents ADD CONSTRAINT commercial_documents_document_type_check 
+    CHECK (document_type IN ('BOQ_SOURCE', 'PO_SOURCE', 'FAC_CERT', 'PAC_CERT', 'DPC_CERT', 'SUPPLIER_INVOICE', 'SIGNED_INVOICE', 'TAX_RECEIPT', 'SUPPORTING_DOCUMENT', 'INVOICE_PACKET', 'PAYMENT_EVIDENCE'));
+
 -- 5. Atomic Commercial Package Ingestion Transaction
 CREATE OR REPLACE FUNCTION public.ingest_commercial_package_atomic(
     p_project_id UUID,
@@ -154,7 +163,7 @@ BEGIN
         p_supplier_id,
         p_currency,
         p_authorized_amount,
-        COALESCE(p_payment_terms_days, 30),
+        p_payment_terms_days,
         now()
     ) RETURNING id INTO v_po_id;
 
@@ -830,6 +839,7 @@ BEGIN
         amount,
         tax_amount,
         currency,
+        notes,
         status
     ) VALUES (
         p_certificate_id,
@@ -840,6 +850,7 @@ BEGIN
         p_amount,
         p_tax_amount,
         v_cert.po_currency,
+        p_notes,
         'DRAFT'
     ) RETURNING id INTO v_invoice_id;
 
@@ -1014,6 +1025,89 @@ GRANT EXECUTE ON FUNCTION public.create_invoice_from_certificate(UUID, UUID, TEX
 
 REVOKE EXECUTE ON FUNCTION public.submit_supplier_invoice(UUID, UUID, UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.submit_supplier_invoice(UUID, UUID, UUID) TO authenticated;
+
+-- 9.3 Safe Delete / Discard Draft Invoice (Section 29)
+CREATE OR REPLACE FUNCTION public.delete_invoice_draft(
+    p_invoice_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_invoice RECORD;
+    v_actor_id UUID;
+    v_paths JSONB;
+BEGIN
+    v_actor_id := auth.uid();
+    IF v_actor_id IS NULL THEN
+        SELECT id INTO v_actor_id FROM public.users WHERE is_active = true LIMIT 1;
+    END IF;
+
+    -- Lock invoice row
+    SELECT * INTO v_invoice
+    FROM public.invoices
+    WHERE id = p_invoice_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Invoice with ID % not found.', p_invoice_id;
+    END IF;
+
+    -- Deletion allowed ONLY when status = DRAFT
+    IF v_invoice.status != 'DRAFT' THEN
+        RAISE EXCEPTION 'Cannot delete invoice with status %. Only DRAFT invoices may be discarded.', v_invoice.status;
+    END IF;
+
+    -- Collect associated document storage paths for storage cleanup
+    SELECT COALESCE(jsonb_agg(storage_path), '[]'::jsonb) INTO v_paths
+    FROM public.commercial_documents
+    WHERE entity_type = 'INVOICE' AND entity_id = p_invoice_id;
+
+    -- Delete allocations
+    DELETE FROM public.invoice_allocations WHERE invoice_id = p_invoice_id;
+
+    -- Delete commercial documents metadata
+    DELETE FROM public.commercial_documents WHERE entity_type = 'INVOICE' AND entity_id = p_invoice_id;
+
+    -- Delete invoice reviews if any
+    DELETE FROM public.invoice_reviews WHERE invoice_id = p_invoice_id;
+
+    -- Delete invoice record
+    DELETE FROM public.invoices WHERE id = p_invoice_id;
+
+    -- Append audit event
+    INSERT INTO public.audit_events (
+        entity_type,
+        entity_id,
+        action,
+        actor_id,
+        new_state,
+        created_at
+    ) VALUES (
+        'INVOICE',
+        p_invoice_id,
+        'INVOICE_DRAFT_DISCARDED',
+        v_actor_id,
+        jsonb_build_object(
+            'clms_reference', v_invoice.clms_reference,
+            'supplier_invoice_number', v_invoice.supplier_invoice_number,
+            'deleted_storage_paths', v_paths
+        ),
+        now()
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'invoice_id', p_invoice_id,
+        'deleted_storage_paths', v_paths
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_invoice_draft(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_invoice_draft(UUID) TO authenticated;
 
 
 

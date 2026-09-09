@@ -13,17 +13,18 @@ export type AgingBucket =
   | 'AGING_31_60'
   | 'AGING_61_90'
   | 'AGING_OVER_90'
-  | 'SETTLED';
+  | 'SETTLED'
+  | 'REQUIRES_REVIEW';
 
 export interface AgingEvaluationInput {
   baselineDate: string | Date; // SC Approved date or Invoice Date
-  paymentTermsDays?: number | undefined; // e.g. 30, 45, 60
+  paymentTermsDays?: number | undefined | null; // e.g. 30, 45, 60, 90
   outstandingBalance: number;
   asOfDate?: string | Date | undefined; // Defaults to current date
 }
 
 export interface AgingEvaluationResult {
-  dueDate: string; // YYYY-MM-DD
+  dueDate: string | null; // YYYY-MM-DD or null if payment terms missing
   daysOverdue: number;
   agingBucket: AgingBucket;
   isOverdue: boolean;
@@ -32,8 +33,18 @@ export interface AgingEvaluationResult {
 
 export class AgingEngine {
   public static evaluateAging(input: AgingEvaluationInput): AgingEvaluationResult {
-    const termDays = input.paymentTermsDays !== undefined && input.paymentTermsDays > 0 ? input.paymentTermsDays : 30;
+    // Section 6: Missing payment terms must NOT become 30 days. No invented dates.
+    if (input.paymentTermsDays === undefined || input.paymentTermsDays === null || input.paymentTermsDays <= 0) {
+      return {
+        dueDate: null,
+        daysOverdue: 0,
+        agingBucket: 'REQUIRES_REVIEW',
+        isOverdue: false,
+        bucketLabel: 'Requires Review (Missing Payment Terms)',
+      };
+    }
 
+    const termDays = input.paymentTermsDays;
     const base = new Date(input.baselineDate);
     // Add payment terms days
     const due = new Date(base.getTime());

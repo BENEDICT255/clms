@@ -13,3 +13,4 @@ export * from './components/DataTable';
 export * from './components/Pagination';
 export * from './components/CommandSearch';
 export * from './components/Tabs';
+export * from './components/DocumentViewer';

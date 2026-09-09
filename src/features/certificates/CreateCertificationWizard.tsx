@@ -300,7 +300,7 @@ export function CreateCertificationWizard({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
             gap: 'var(--space-2)',
             borderBottom: '1px solid var(--color-border-hairline)',
             paddingBottom: 'var(--space-3)',
@@ -354,7 +354,7 @@ export function CreateCertificationWizard({
               <label style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-semibold)', display: 'block', marginBottom: 'var(--space-2)' }}>
                 Milestone Certificate Type
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-3)' }}>
                 {[
                   {
                     type: 'FAC' as CertificateType,

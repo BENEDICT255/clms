@@ -174,14 +174,17 @@ export class CommercialPackageRepository {
       const boqMimeType = payload.boqFile?.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       const poMimeType = payload.poFile?.type || 'application/pdf';
 
-      // 1. Upload files to private Storage bucket if File objects are provided
+      // 1. Upload files to private Storage bucket if File objects are provided (Strict provenance required)
       if (payload.boqFile) {
         const { error: boqErr } = await supabase.storage
           .from('commercial-documents')
           .upload(boqStoragePath, payload.boqFile, { upsert: true });
 
         if (boqErr) {
-          console.warn('Private storage upload warning (BOQ):', boqErr.message);
+          return {
+            success: false,
+            error: `Failed to upload BOQ source document to private storage: ${boqErr.message}. Commercial package confirmation blocked.`,
+          };
         }
       }
 
@@ -191,7 +194,10 @@ export class CommercialPackageRepository {
           .upload(poStoragePath, payload.poFile, { upsert: true });
 
         if (poErr) {
-          console.warn('Private storage upload warning (PO):', poErr.message);
+          return {
+            success: false,
+            error: `Failed to upload PO source document to private storage: ${poErr.message}. Commercial package confirmation blocked.`,
+          };
         }
       }
 
@@ -202,7 +208,7 @@ export class CommercialPackageRepository {
         p_po_number: payload.poNumber,
         p_currency: payload.currency,
         p_authorized_amount: payload.authorizedAmount,
-        p_payment_terms_days: payload.paymentTermsDays ?? 30,
+        p_payment_terms_days: payload.paymentTermsDays ?? null,
         p_template_version: payload.templateVersion,
         p_sites: payload.sites,
         p_boq_file_name: payload.boqFileName,

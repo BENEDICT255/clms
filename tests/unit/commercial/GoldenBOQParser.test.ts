@@ -15,10 +15,11 @@ import * as path from 'path';
 import { BOQParser } from '@/domain/commercial/BOQParser';
 
 describe('Golden BOQ Parser Regression Test', () => {
-  const filePath = path.resolve(
-    process.cwd(),
-    'ACTULA/BOQ sample.xlsx'
-  );
+  const boqCandidates = [
+    path.resolve(process.cwd(), 'ACTULA/Site Improvement( Oversite Aggregates and Concrete ) BOQ-16sites-Prime power_Reviewed (1).xlsx'),
+    path.resolve(process.cwd(), 'ACTULA/BOQ sample.xlsx'),
+  ];
+  const filePath = boqCandidates.find((p) => fs.existsSync(p)) || boqCandidates[0];
 
   it('verifies the golden file exists on disk', () => {
     expect(fs.existsSync(filePath)).toBe(true);

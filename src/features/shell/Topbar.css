@@ -25,7 +25,9 @@
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
   transition: border-color var(--transition-fast), background-color var(--transition-fast);
-  width: 280px;
+  width: 100%;
+  max-width: 280px;
+  min-width: 140px;
 }
 
 .clms-topbar__search-trigger:hover {
@@ -174,4 +176,29 @@
 .clms-topbar__dropdown-item--danger:hover {
   background-color: var(--color-status-danger-bg);
   color: var(--color-status-danger-text);
+}
+
+@media (max-width: 1024px) {
+  .clms-topbar {
+    padding: 0 var(--space-4);
+  }
+  .clms-topbar__search-trigger {
+    max-width: 180px;
+    min-width: 100px;
+  }
+  .clms-topbar__search-kbd {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .clms-topbar__search-trigger {
+    max-width: 36px;
+    min-width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+  .clms-topbar__search-placeholder {
+    display: none;
+  }
 }

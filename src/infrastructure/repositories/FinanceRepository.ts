@@ -18,8 +18,8 @@ export interface FinanceQueueItem {
   outstandingBalance: number;
   invoiceDate: string;
   scApprovedAt?: string | undefined;
-  paymentTermsDays: number;
-  dueDate: string;
+  paymentTermsDays?: number | undefined;
+  dueDate?: string | null | undefined;
   daysOverdue: number;
   agingBucket: AgingBucket;
   status: string;
@@ -109,7 +109,7 @@ export class FinanceRepository {
           outstandingBalance: Number(row.outstanding_balance) || 0,
           invoiceDate: row.invoice_date,
           scApprovedAt: row.sc_approved_at ?? undefined,
-          paymentTermsDays: Number(row.payment_terms_days) || 30,
+          paymentTermsDays: row.payment_terms_days != null ? Number(row.payment_terms_days) : undefined,
           dueDate: row.due_date,
           daysOverdue: Number(row.days_overdue) || 0,
           agingBucket: row.aging_bucket as AgingBucket,
@@ -212,7 +212,9 @@ export class FinanceRepository {
       const cumulativePaid = payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
       const outstanding = Math.max(0, totalPayable - cumulativePaid);
 
-      const termsDays = row.certificates?.purchase_orders?.payment_terms_days || 30;
+      const termsDays = row.certificates?.purchase_orders?.payment_terms_days != null
+        ? Number(row.certificates.purchase_orders.payment_terms_days)
+        : undefined;
       const baselineDate = row.sc_approved_at || row.invoice_date || new Date().toISOString();
 
       const aging = AgingEngine.evaluateAging({

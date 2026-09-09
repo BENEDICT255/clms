@@ -15,10 +15,11 @@ import * as path from 'path';
 import { POParser } from '@/domain/commercial/POParser';
 
 describe('Golden PO Parser Regression Test', () => {
-  const filePath = path.resolve(
-    process.cwd(),
-    'ACTULA/PO sample.pdf'
-  );
+  const poCandidates = [
+    path.resolve(process.cwd(), 'ACTULA/PO 4500015358 -16 Sites- Primepower.pdf'),
+    path.resolve(process.cwd(), 'ACTULA/PO sample.pdf'),
+  ];
+  const filePath = poCandidates.find((p) => fs.existsSync(p)) || poCandidates[0];
 
   it('verifies the golden PO PDF exists on disk', () => {
     expect(fs.existsSync(filePath)).toBe(true);

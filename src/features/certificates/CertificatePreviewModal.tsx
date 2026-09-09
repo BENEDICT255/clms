@@ -89,10 +89,10 @@ export function CertificatePreviewModal({
       const pdfBytes = await CertificatePdfService.generateCertificatePdf({
         certificate,
         poSites,
-        reviewerName: user?.fullName || 'Benedict Bisama',
+        reviewerName: user?.fullName,
       });
       CertificatePdfService.triggerDownload(pdfBytes, `${certificate.certificateNumber}.pdf`);
-      setSuccessMsg(`Downloaded 9-page certificate packet: ${certificate.certificateNumber}.pdf`);
+      setSuccessMsg(`Downloaded certificate packet: ${certificate.certificateNumber}.pdf`);
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to generate PDF');
     } finally {
@@ -394,7 +394,7 @@ export function CertificatePreviewModal({
             <CertificateDocumentView
               certificate={certificate}
               poSites={poSites}
-              reviewerName={user?.fullName || 'Benedict Bisama'}
+              reviewerName={user?.fullName}
             />
           </div>
         )}
@@ -407,7 +407,7 @@ export function CertificatePreviewModal({
               className="border-hairline"
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
                 gap: 'var(--space-3)',
                 padding: 'var(--space-3) var(--space-4)',
                 borderRadius: 'var(--radius-xs)',
