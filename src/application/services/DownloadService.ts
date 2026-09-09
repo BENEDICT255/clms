@@ -16,6 +16,8 @@ class DownloadService {
   /**
    * Initiates a clean, browser-native file download from a memory Blob.
    * Single-flight protected: Duplicate calls for the same file in rapid succession are ignored.
+   * IDM-Immune: Utilizes File System Access API (showSaveFilePicker) in Chromium browsers
+   * to write directly to disk without triggering IDM COM error 0x80040154.
    */
   public downloadBlob(blob: Blob, fileName: string): boolean {
     const now = Date.now();
@@ -29,8 +31,48 @@ class DownloadService {
     this.activeDownloads.add(downloadKey);
     this.lastDownloadTime = now;
 
+    // 1. Try modern File System Access API in Chromium browsers (Edge, Chrome)
+    // Completely bypasses browser extension download hijackers (IDM 0x80040154)
+    if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+      (async () => {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: fileName,
+            types: [
+              {
+                description: 'PDF Document (*.pdf)',
+                accept: { 'application/pdf': ['.pdf'] },
+              },
+            ],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        } catch (err: any) {
+          if (err.name === 'AbortError') {
+            // User dismissed the Save dialog — harmless cancel
+            return;
+          }
+          // Fallback to safe anchor download
+          this.executeAnchorDownload(blob, fileName);
+        } finally {
+          this.activeDownloads.delete(downloadKey);
+        }
+      })();
+      return true;
+    }
+
+    return this.executeAnchorDownload(blob, fileName, downloadKey);
+  }
+
+  private executeAnchorDownload(blob: Blob, fileName: string, downloadKey?: string): boolean {
     try {
-      const url = URL.createObjectURL(blob);
+      // Force octet-stream MIME type to prevent download manager MIME-type sniffers from intercepting
+      const safeBlob = blob.type === 'application/octet-stream'
+        ? blob
+        : new Blob([blob], { type: 'application/octet-stream' });
+
+      const url = URL.createObjectURL(safeBlob);
       const link = document.createElement('a');
       link.href = url;
       link.download = fileName;
@@ -42,12 +84,12 @@ class DownloadService {
       // Revoke the object URL after browser starts processing download
       setTimeout(() => {
         URL.revokeObjectURL(url);
-        this.activeDownloads.delete(downloadKey);
+        if (downloadKey) this.activeDownloads.delete(downloadKey);
       }, 5000);
 
       return true;
     } catch (err) {
-      this.activeDownloads.delete(downloadKey);
+      if (downloadKey) this.activeDownloads.delete(downloadKey);
       console.error(`[DownloadService] Failed to trigger download for "${fileName}":`, err);
       throw err;
     }

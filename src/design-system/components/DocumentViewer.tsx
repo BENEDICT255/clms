@@ -41,6 +41,7 @@ export interface DocumentViewerProps {
   showPrint?: boolean;
   onDownload?: () => void;
   className?: string;
+  isLoading?: boolean;
 }
 
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({
@@ -54,6 +55,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   showPrint = true,
   onDownload,
   className = '',
+  isLoading: propLoading = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -76,8 +78,13 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
     async function loadPdf() {
       if (!source) {
-        setIsLoading(false);
-        setErrorMsg('No document source provided.');
+        if (!propLoading) {
+          setIsLoading(false);
+          setErrorMsg('No document source provided.');
+        } else {
+          setIsLoading(true);
+          setErrorMsg(null);
+        }
         return;
       }
 
@@ -111,7 +118,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           throw new Error('Unsupported document source type.');
         }
 
-        loadingTask = pdfjsLib.getDocument({ data: docData });
+        loadingTask = pdfjsLib.getDocument({
+          data: docData,
+          useSystemFonts: true,
+        });
         const loadedPdf = await loadingTask.promise;
 
         if (isCancelled) return;
@@ -137,7 +147,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         loadingTask.destroy().catch(() => {});
       }
     };
-  }, [source]);
+  }, [source, propLoading]);
 
   // 2. Render all pages on canvas
   const renderPages = useCallback(async () => {
@@ -334,14 +344,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         className="clms-document-viewer__viewport"
         onScroll={handleScroll}
       >
-        {isLoading && (
+        {(isLoading || propLoading) && (
           <div className="clms-document-viewer__loading">
             <div className="clms-document-viewer__spinner" />
             <p>Loading document packet...</p>
           </div>
         )}
 
-        {errorMsg && (
+        {!(isLoading || propLoading) && errorMsg && (
           <div className="clms-document-viewer__error">
             <AlertCircle size={32} color="var(--color-status-danger, #EF4444)" />
             <p className="clms-document-viewer__error-title">Document Preview Unavailable</p>
@@ -349,7 +359,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           </div>
         )}
 
-        {!isLoading && !errorMsg && renderedPages.map((pNum) => (
+        {!(isLoading || propLoading) && !errorMsg && renderedPages.map((pNum) => (
           <div
             key={pNum}
             id={`clms-doc-wrapper-${pNum}`}

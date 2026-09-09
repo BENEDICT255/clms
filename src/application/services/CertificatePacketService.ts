@@ -45,6 +45,7 @@ function formatMoney(amount: number): string {
 }
 
 let cachedLogoBytes: ArrayBuffer | null = null;
+const poDocBytesCache = new Map<string, ArrayBuffer>();
 
 async function getHeliosLogoBytes(): Promise<ArrayBuffer | null> {
   if (cachedLogoBytes) return cachedLogoBytes;
@@ -65,64 +66,106 @@ async function getHeliosLogoBytes(): Promise<ArrayBuffer | null> {
 export class CertificatePacketService {
   /**
    * Dynamically retrieves the actual PO document bytes linked to this certificate's parent PO.
+   * Features:
+   * - In-memory caching: 0ms subsequent retrieval
+   * - Zero IDM interception: uses .dat asset stream and octet-stream
+   * - 2.5s network timeout guard preventing unlinked Supabase queries from hanging
    */
   public static async fetchLinkedPoDocBytes(poId: string, poNumber?: string): Promise<ArrayBuffer | null> {
-    try {
-      // 1. Look up commercial_documents metadata for PO_SOURCE
-      const { data, error } = await supabase
-        .from('commercial_documents')
-        .select('storage_path, storage_bucket')
-        .eq('entity_type', 'PURCHASE_ORDER')
-        .eq('entity_id', poId)
-        .eq('document_type', 'PO_SOURCE')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (!error && data?.storage_path) {
-        const blob = await documentStorageService.fetchBlob(data.storage_path, data.storage_bucket);
-        return await blob.arrayBuffer();
-      }
-
-      // 2. Alternatively check via commercial package parent
-      const { data: poRow } = await supabase
-        .from('purchase_orders')
-        .select('package_id, po_number')
-        .eq('id', poId)
-        .maybeSingle();
-
-      if (poRow?.package_id) {
-        const { data: pkgDoc } = await supabase
-          .from('commercial_documents')
-          .select('storage_path, storage_bucket')
-          .eq('entity_type', 'PURCHASE_ORDER')
-          .eq('document_type', 'PO_SOURCE')
-          .limit(1)
-          .maybeSingle();
-
-        if (pkgDoc?.storage_path) {
-          const blob = await documentStorageService.fetchBlob(pkgDoc.storage_path, pkgDoc.storage_bucket);
-          return await blob.arrayBuffer();
-        }
-      }
-    } catch (err) {
-      console.warn('[CertificatePacketService] Could not dynamically fetch PO from storage:', err);
+    // 1. Check in-memory cache
+    if (poNumber && poDocBytesCache.has(poNumber)) {
+      return poDocBytesCache.get(poNumber)!;
+    }
+    if (poId && poDocBytesCache.has(poId)) {
+      return poDocBytesCache.get(poId)!;
     }
 
-    // 3. Check exact PO number in test environment or assets (STRICTLY matching poNumber, never arbitrary fallback)
+    // 2. High-performance, IDM-immune local asset check (served as .dat / application/octet-stream, with fallback to .pdf)
     const effectivePoNum = poNumber;
     if (effectivePoNum && typeof globalThis.fetch === 'function') {
       try {
-        const res = await globalThis.fetch(`/assets/po_${effectivePoNum}.pdf`);
+        let res = await globalThis.fetch(`/assets/po_${effectivePoNum}.dat`);
+        if (!res.ok) {
+          res = await globalThis.fetch(`/assets/po_${effectivePoNum}.pdf`);
+        }
         if (res.ok) {
-          return await res.arrayBuffer();
+          const buffer = await res.arrayBuffer();
+          if (buffer && buffer.byteLength > 0) {
+            poDocBytesCache.set(effectivePoNum, buffer);
+            if (poId) poDocBytesCache.set(poId, buffer);
+            return buffer;
+          }
         }
       } catch {
-        // Ignored
+        // Fall through to remote storage lookup
       }
     }
 
-    return null;
+    // 3. Supabase Storage lookup with 2500ms timeout guard
+    const storageLookup = async (): Promise<ArrayBuffer | null> => {
+      try {
+        if (!poId) return null;
+
+        // Query commercial_documents metadata for PO_SOURCE
+        const { data, error } = await supabase
+          .from('commercial_documents')
+          .select('storage_path, storage_bucket')
+          .eq('entity_type', 'PURCHASE_ORDER')
+          .eq('entity_id', poId)
+          .eq('document_type', 'PO_SOURCE')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!error && data?.storage_path) {
+          const blob = await documentStorageService.fetchBlob(data.storage_path, data.storage_bucket);
+          const buffer = await blob.arrayBuffer();
+          if (buffer && buffer.byteLength > 0) {
+            if (effectivePoNum) poDocBytesCache.set(effectivePoNum, buffer);
+            poDocBytesCache.set(poId, buffer);
+            return buffer;
+          }
+        }
+
+        // Alternatively check commercial package parent
+        const { data: poRow } = await supabase
+          .from('purchase_orders')
+          .select('package_id, po_number')
+          .eq('id', poId)
+          .maybeSingle();
+
+        if (poRow?.package_id) {
+          const { data: pkgDoc } = await supabase
+            .from('commercial_documents')
+            .select('storage_path, storage_bucket')
+            .eq('entity_type', 'PURCHASE_ORDER')
+            .eq('document_type', 'PO_SOURCE')
+            .limit(1)
+            .maybeSingle();
+
+          if (pkgDoc?.storage_path) {
+            const blob = await documentStorageService.fetchBlob(pkgDoc.storage_path, pkgDoc.storage_bucket);
+            const buffer = await blob.arrayBuffer();
+            if (buffer && buffer.byteLength > 0) {
+              if (effectivePoNum) poDocBytesCache.set(effectivePoNum, buffer);
+              poDocBytesCache.set(poId, buffer);
+              return buffer;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[CertificatePacketService] Could not fetch PO from storage:', err);
+      }
+      return null;
+    };
+
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+
+    try {
+      return await Promise.race([storageLookup(), timeoutPromise]);
+    } catch {
+      return null;
+    }
   }
 
   /**
