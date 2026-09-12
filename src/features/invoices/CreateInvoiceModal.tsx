@@ -497,13 +497,17 @@ export function CreateInvoiceModal({
     }
   };
 
+  const handleModalClose = useCallback(() => {
+    if (!isSubmitting && !isSavingDraft && !isDiscardingDraft) {
+      onClose();
+    }
+  }, [isSubmitting, isSavingDraft, isDiscardingDraft, onClose]);
+
   return (
     <>
       <Modal
         isOpen={isOpen}
-        onClose={() => {
-          if (!isSubmitting && !isSavingDraft && !isDiscardingDraft) onClose();
-        }}
+        onClose={handleModalClose}
         title="Supplier Commercial Invoice Claim"
         width="840px"
         footer={
