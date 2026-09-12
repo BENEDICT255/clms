@@ -303,6 +303,9 @@ export class InvoiceRepository {
       // 2. Compute SHA-256
       const sha256 = await documentStorageService.computeChecksum(params.file);
 
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUserId = authData?.user?.id || null;
+
       // 3. Insert metadata record in commercial_documents
       const { data: docData, error: docErr } = await supabase
         .from('commercial_documents')
@@ -316,6 +319,7 @@ export class InvoiceRepository {
           file_size: params.file.size,
           mime_type: params.file.type || 'application/pdf',
           sha256_hash: sha256,
+          uploaded_by: currentUserId,
           is_immutable: false, // Remains mutable while invoice is DRAFT
         })
         .select('id')

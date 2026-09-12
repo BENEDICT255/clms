@@ -351,6 +351,9 @@ export class CertificateRepository {
 
       const docType = certType === 'PAC' ? 'PAC_CERT' : 'FAC_CERT';
 
+      const { data: authData } = await supabase.auth.getUser();
+      const currentUserId = authData?.user?.id || null;
+
       // 3. Insert metadata record in commercial_documents
       const { data: docData, error: docErr } = await supabase
         .from('commercial_documents')
@@ -364,6 +367,7 @@ export class CertificateRepository {
           file_size: file.size,
           mime_type: file.type || 'application/pdf',
           sha256_hash: sha256,
+          uploaded_by: currentUserId,
           is_immutable: true,
         })
         .select('id')
