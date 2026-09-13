@@ -20,6 +20,8 @@ import {
   Modal,
   Alert,
   Input,
+  Tabs,
+  TabItem,
 } from '@/design-system';
 import {
   supplyChainRepository,
@@ -235,6 +237,32 @@ export function SupplyChainPage() {
     return `${diffDays}d ago`;
   };
 
+  // Tab state for SCM Review categories
+  const [activeTab, setActiveTab] = useState('ALL');
+
+  const isPending = (status: string) => status === 'SUBMITTED' || status === 'RESUBMITTED';
+  const isApproved = (status: string) =>
+    ['SC_APPROVED', 'UNDER_FINANCE_REVIEW', 'APPROVED_FOR_PAYMENT', 'PARTIALLY_PAID', 'SETTLED'].includes(status);
+  const isReturned = (status: string) => status === 'RETURNED';
+
+  const pendingCount = pendingInvoices.filter((i) => isPending(i.status)).length;
+  const approvedCount = pendingInvoices.filter((i) => isApproved(i.status)).length;
+  const returnedCount = pendingInvoices.filter((i) => isReturned(i.status)).length;
+
+  const scmTabs: TabItem[] = [
+    { id: 'ALL', label: `All Claims (${pendingInvoices.length})` },
+    { id: 'PENDING', label: `Pending Review (${pendingCount})` },
+    { id: 'APPROVED', label: `Approved (${approvedCount})` },
+    { id: 'RETURNED', label: `Returned (${returnedCount})` },
+  ];
+
+  const filteredInvoices = pendingInvoices.filter((item) => {
+    if (activeTab === 'PENDING') return isPending(item.status);
+    if (activeTab === 'APPROVED') return isApproved(item.status);
+    if (activeTab === 'RETURNED') return isReturned(item.status);
+    return true;
+  });
+
   const columns: Column<InvoiceRecord>[] = [
     { header: 'CLMS Ref', accessorKey: 'clmsRef', width: '140px' },
     { header: 'Supplier Invoice No', accessorKey: 'supplierInvoiceNo', width: '160px' },
@@ -281,7 +309,7 @@ export function SupplyChainPage() {
           icon={<Eye size={14} />}
           onClick={() => handleInspect(row)}
         >
-          Review
+          {isPending(row.status) ? 'Review' : 'Inspect'}
         </Button>
       ),
     },
@@ -316,12 +344,32 @@ export function SupplyChainPage() {
         </Alert>
       )}
 
+      {/* SCM Queue Filter Tabs */}
+      <Tabs
+        tabs={scmTabs}
+        activeTabId={activeTab}
+        onTabChange={setActiveTab}
+        style={{ marginBottom: 'var(--space-3)' }}
+      />
+
       <DataTable
         columns={columns}
-        data={pendingInvoices}
+        data={filteredInvoices}
         isLoading={isLoading}
-        emptyTitle="No invoices are awaiting Supply Chain review"
-        emptyDescription="Invoices submitted by suppliers against issued certificates will automatically arrive in this queue for commercial verification."
+        emptyTitle={
+          activeTab === 'PENDING'
+            ? 'No invoices are awaiting Supply Chain review'
+            : activeTab === 'APPROVED'
+            ? 'No invoices have been approved yet'
+            : activeTab === 'RETURNED'
+            ? 'No invoices have been returned'
+            : 'No Supply Chain invoices found'
+        }
+        emptyDescription={
+          activeTab === 'PENDING'
+            ? 'Invoices submitted by suppliers against issued certificates will automatically arrive in this queue for commercial verification.'
+            : 'Invoices reviewed and processed by Supply Chain appear here.'
+        }
       />
 
       {/* Side-by-Side SCM Review Drawer */}
@@ -341,33 +389,58 @@ export function SupplyChainPage() {
         footer={
           selectedInvoice && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-              <Button
-                variant="danger"
-                size="md"
-                icon={<RotateCcw size={16} />}
-                onClick={handleOpenReturnModal}
-              >
-                Return to Supplier
-              </Button>
-              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                <Button variant="secondary" size="md" onClick={() => setIsDrawerOpen(false)}>
-                  Close
-                </Button>
-                <Button
-                  variant="primary"
-                  size="md"
-                  icon={<Send size={16} />}
-                  onClick={handleOpenApproveModal}
-                >
-                  Approve & Send to Finance
-                </Button>
-              </div>
+              {isPending(selectedInvoice.status) ? (
+                <>
+                  <Button
+                    variant="danger"
+                    size="md"
+                    icon={<RotateCcw size={16} />}
+                    onClick={handleOpenReturnModal}
+                  >
+                    Return to Supplier
+                  </Button>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                    <Button variant="secondary" size="md" onClick={() => setIsDrawerOpen(false)}>
+                      Close
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="md"
+                      icon={<Send size={16} />}
+                      onClick={handleOpenApproveModal}
+                    >
+                      Approve & Send to Finance
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <StatusBadge
+                    status={selectedInvoice.status}
+                    label={isApproved(selectedInvoice.status) ? 'Approved by Supply Chain' : undefined}
+                    size="md"
+                  />
+                  <Button variant="secondary" size="md" onClick={() => setIsDrawerOpen(false)}>
+                    Close
+                  </Button>
+                </>
+              )}
             </div>
           )
         }
       >
         {selectedInvoice && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', fontSize: 'var(--font-size-xs)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', fontSize: 'var(--font-size-xs)' }}>
+            {isApproved(selectedInvoice.status) && (
+              <Alert type="success" title="Supply Chain Verified & Approved">
+                This commercial claim was approved by Supply Chain and transferred to Finance for payment processing and voucher disbursement.
+              </Alert>
+            )}
+            {isReturned(selectedInvoice.status) && (
+              <Alert type="danger" title="Returned to Supplier">
+                This commercial claim was returned to the supplier for corrections.
+              </Alert>
+            )}
             {/* Context Box */}
             <div
               className="border-hairline"

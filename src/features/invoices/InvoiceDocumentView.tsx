@@ -16,6 +16,7 @@ import React, { useState, useEffect } from 'react';
 import { InvoiceRecord, invoiceRepository } from '@/infrastructure/repositories/InvoiceRepository';
 import { certificateRepository } from '@/infrastructure/repositories/CertificateRepository';
 import { CertificatePacketService } from '@/application/services/CertificatePacketService';
+import { InvoicePacketService, SupportingDocumentItem } from '@/application/services/InvoicePacketService';
 import { DocumentViewer, Button } from '@/design-system';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { documentStorageService } from '@/infrastructure/storage/DocumentStorageService';
@@ -45,14 +46,15 @@ export const InvoiceDocumentView: React.FC<InvoiceDocumentViewProps> = ({
       // 1. Try to load pre-compiled authoritative unified document from storage
       setLoadingStep('Checking commercial vault for authoritative packet snapshot...');
       const storedDoc = await invoiceRepository.getUnifiedInvoiceDocument(invoice.id);
-      if (storedDoc) {
+      if (storedDoc && storedDoc.fileSize > 1000) {
         try {
           const blob = await documentStorageService.downloadBlob(storedDoc.storagePath);
           const buffer = await blob.arrayBuffer();
           const bytes = new Uint8Array(buffer);
-          if (bytes.length > 0) {
-            setPdfBytes(bytes);
-            onPdfReady?.(bytes);
+          if (bytes.length > 1000) {
+            const safeBytes = new Uint8Array(bytes.slice());
+            setPdfBytes(safeBytes);
+            onPdfReady?.(new Uint8Array(safeBytes.slice()));
             setIsLoading(false);
             return;
           }
@@ -61,8 +63,8 @@ export const InvoiceDocumentView: React.FC<InvoiceDocumentViewProps> = ({
         }
       }
 
-      // 2. Fallback: Dynamically assemble the certificate packet linked to this invoice
-      setLoadingStep('Assembling authentic commercial certificate packet from linked PO...');
+      // 2. Fallback: Dynamically assemble the continuous commercial packet (Section A + B + C)
+      setLoadingStep('Assembling authentic continuous commercial packet...');
       const cert = await certificateRepository.getCertificateById(invoice.certificateId);
       if (!cert) {
         setError(`Referenced certificate (${invoice.certificateNumber}) could not be retrieved.`);
@@ -71,13 +73,66 @@ export const InvoiceDocumentView: React.FC<InvoiceDocumentViewProps> = ({
       }
 
       const poSites = await certificateRepository.getPoSites(cert.poId);
+      const invoiceDocs = await invoiceRepository.listInvoiceDocuments(invoice.id);
+      const primaryDoc = invoiceDocs.find((d) => d.documentType === 'SUPPLIER_INVOICE');
+      const receiptDoc = invoiceDocs.find((d) => d.documentType === 'TAX_RECEIPT');
+      const supportingDocs = invoiceDocs.filter((d) => d.documentType === 'SUPPORTING_DOCUMENT');
+
+      if (primaryDoc) {
+        try {
+          const pBlob = await documentStorageService.downloadBlob(primaryDoc.storagePath);
+          const invBytes = await pBlob.arrayBuffer();
+
+          const supportingItems: SupportingDocumentItem[] = [];
+          if (receiptDoc) {
+            try {
+              const rBlob = await documentStorageService.downloadBlob(receiptDoc.storagePath);
+              supportingItems.push({
+                fileName: receiptDoc.fileName,
+                bytes: await rBlob.arrayBuffer(),
+                documentRole: 'TAX_RECEIPT',
+              });
+            } catch {}
+          }
+
+          for (const sDoc of supportingDocs) {
+            try {
+              const sBlob = await documentStorageService.downloadBlob(sDoc.storagePath);
+              supportingItems.push({
+                fileName: sDoc.fileName,
+                bytes: await sBlob.arrayBuffer(),
+                documentRole: 'SUPPORTING_DOCUMENT',
+              });
+            } catch {}
+          }
+
+          const compileResult = await InvoicePacketService.compileInvoicePacket({
+            invoiceBytes: invBytes,
+            invoiceFileName: primaryDoc.fileName,
+            supportingDocs: supportingItems,
+            certificate: cert,
+            poSites,
+          });
+
+          const safeBytes = new Uint8Array(compileResult.pdfBytes.slice());
+          setPdfBytes(safeBytes);
+          onPdfReady?.(new Uint8Array(safeBytes.slice()));
+          setIsLoading(false);
+          return;
+        } catch (packetErr) {
+          console.warn('[InvoiceDocumentView] Dynamic full packet compile error, falling back to cert:', packetErr);
+        }
+      }
+
+      // 3. Fallback to 9-page certificate packet
       const certResult = await CertificatePacketService.generateCertificatePacket({
         certificate: cert,
         poSites,
       });
 
-      setPdfBytes(certResult.pdfBytes);
-      onPdfReady?.(certResult.pdfBytes);
+      const safeCertBytes = new Uint8Array(certResult.pdfBytes.slice());
+      setPdfBytes(safeCertBytes);
+      onPdfReady?.(new Uint8Array(safeCertBytes.slice()));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to compile commercial packet';
       setError(msg);

@@ -18,7 +18,8 @@ export interface InvoiceReviewHistoryItem {
 
 export class SupplyChainRepository {
   /**
-   * Fetches the Supply Chain review queue: all invoices in SUBMITTED or RESUBMITTED status.
+   * Fetches the Supply Chain review queue: all invoices awaiting review (SUBMITTED, RESUBMITTED)
+   * or already approved / processed by SCM (SC_APPROVED, UNDER_FINANCE_REVIEW, APPROVED_FOR_PAYMENT, PARTIALLY_PAID, SETTLED, RETURNED).
    */
   public async getPendingReviewQueue(): Promise<InvoiceRecord[]> {
     try {
@@ -50,7 +51,16 @@ export class SupplyChainRepository {
             )
           )
         `)
-        .in('status', ['SUBMITTED', 'RESUBMITTED'])
+        .in('status', [
+          'SUBMITTED',
+          'RESUBMITTED',
+          'SC_APPROVED',
+          'UNDER_FINANCE_REVIEW',
+          'APPROVED_FOR_PAYMENT',
+          'PARTIALLY_PAID',
+          'SETTLED',
+          'RETURNED',
+        ])
         .order('created_at', { ascending: false });
 
       if (error) {

@@ -19,15 +19,19 @@ import { PoSiteDetail } from '@/application/services/CertificatePacketService';
 import { InvoicePacketService, SupportingDocumentItem } from '@/application/services/InvoicePacketService';
 import { DocumentViewer } from '@/design-system';
 import { Send, RefreshCw, AlertCircle } from 'lucide-react';
+import { documentStorageService } from '@/infrastructure/storage/DocumentStorageService';
 
 interface PreSubmitInvoicePreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   certificate: CertificateRecord;
   poSites: PoSiteDetail[];
-  invoiceFile: File;
+  invoiceFile?: File | null | undefined;
+  primaryDocStoragePath?: string | null | undefined;
   receiptFile?: File | null | undefined;
+  receiptDocStoragePath?: string | null | undefined;
   supportingFiles?: File[] | undefined;
+  supportingDocStoragePaths?: { fileName: string; storagePath: string }[] | undefined;
   supplierInvoiceNo: string;
   invoiceDate: string;
   invoiceAmount: number;
@@ -48,8 +52,11 @@ export const PreSubmitInvoicePreviewModal: React.FC<PreSubmitInvoicePreviewModal
   certificate,
   poSites,
   invoiceFile,
+  primaryDocStoragePath,
   receiptFile,
+  receiptDocStoragePath,
   supportingFiles = [],
+  supportingDocStoragePaths = [],
   supplierInvoiceNo,
   invoiceDate: _invoiceDate,
   invoiceAmount: _invoiceAmount,
@@ -63,16 +70,16 @@ export const PreSubmitInvoicePreviewModal: React.FC<PreSubmitInvoicePreviewModal
   onCompiledBytesReady,
   onSubmit,
 }) => {
-  const [compiledBytes, setCompiledBytes] = useState<Uint8Array | null>(precompiledBytes || null);
+  const [compiledBytes, setCompiledBytes] = useState<Uint8Array | null>(precompiledBytes ? new Uint8Array(precompiledBytes.slice()) : null);
   const [isLoading, setIsLoading] = useState<boolean>(!precompiledBytes);
   const [loadingStep, setLoadingStep] = useState<string>('Compiling authoritative commercial packet...');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isOpen || !invoiceFile) return;
+    if (!isOpen) return;
 
-    if (precompiledBytes && precompiledBytes.byteLength > 0) {
-      setCompiledBytes(precompiledBytes);
+    if (precompiledBytes && precompiledBytes.byteLength > 0 && precompiledBytes.buffer.byteLength > 0) {
+      setCompiledBytes(new Uint8Array(precompiledBytes.slice()));
       setIsLoading(false);
       return;
     }
@@ -85,32 +92,76 @@ export const PreSubmitInvoicePreviewModal: React.FC<PreSubmitInvoicePreviewModal
       setLoadingStep('Reading uploaded commercial invoice document...');
 
       try {
-        const invBuffer = await invoiceFile.arrayBuffer();
+        let invBuffer: ArrayBuffer | null = null;
+        let invFileName = 'supplier_invoice.pdf';
+        let invMimeType: string | undefined = undefined;
+
+        if (invoiceFile && invoiceFile.size > 0) {
+          invBuffer = await invoiceFile.arrayBuffer();
+          invFileName = invoiceFile.name;
+          invMimeType = invoiceFile.type;
+        } else if (primaryDocStoragePath) {
+          setLoadingStep('Fetching supplier invoice document from commercial storage...');
+          const blob = await documentStorageService.downloadBlob(primaryDocStoragePath);
+          invBuffer = await blob.arrayBuffer();
+        }
+
+        if (!invBuffer || invBuffer.byteLength === 0) {
+          throw new Error('No supplier commercial invoice document attached. Please attach your invoice PDF to preview.');
+        }
 
         const supportingItems: SupportingDocumentItem[] = [];
-        if (receiptFile) {
+        if (receiptFile && receiptFile.size > 0) {
           const recBuffer = await receiptFile.arrayBuffer();
           supportingItems.push({
             fileName: receiptFile.name,
             bytes: recBuffer,
             documentRole: 'TAX_RECEIPT',
           });
+        } else if (receiptDocStoragePath) {
+          try {
+            const blob = await documentStorageService.downloadBlob(receiptDocStoragePath);
+            supportingItems.push({
+              fileName: 'fiscal_receipt.pdf',
+              bytes: await blob.arrayBuffer(),
+              documentRole: 'TAX_RECEIPT',
+            });
+          } catch (rErr) {
+            console.warn('[PreSubmitInvoicePreviewModal] Receipt fetch error:', rErr);
+          }
         }
 
         for (const sf of supportingFiles) {
-          const sfBuffer = await sf.arrayBuffer();
-          supportingItems.push({
-            fileName: sf.name,
-            bytes: sfBuffer,
-            documentRole: 'SUPPORTING_DOCUMENT',
-          });
+          if (sf.size > 0) {
+            const sfBuffer = await sf.arrayBuffer();
+            supportingItems.push({
+              fileName: sf.name,
+              bytes: sfBuffer,
+              documentRole: 'SUPPORTING_DOCUMENT',
+            });
+          }
+        }
+
+        if (supportingDocStoragePaths) {
+          for (const sDoc of supportingDocStoragePaths) {
+            try {
+              const blob = await documentStorageService.downloadBlob(sDoc.storagePath);
+              supportingItems.push({
+                fileName: sDoc.fileName,
+                bytes: await blob.arrayBuffer(),
+                documentRole: 'SUPPORTING_DOCUMENT',
+              });
+            } catch (sErr) {
+              console.warn('[PreSubmitInvoicePreviewModal] Supporting doc fetch error:', sErr);
+            }
+          }
         }
 
         setLoadingStep('Merging supplier invoice, annexes, and official certificate packet...');
         const result = await InvoicePacketService.compileInvoicePacket({
           invoiceBytes: invBuffer,
-          invoiceFileName: invoiceFile.name,
-          invoiceMimeType: invoiceFile.type,
+          invoiceFileName: invFileName,
+          invoiceMimeType: invMimeType,
           supportingDocs: supportingItems,
           certificate,
           poSites,
@@ -119,8 +170,9 @@ export const PreSubmitInvoicePreviewModal: React.FC<PreSubmitInvoicePreviewModal
 
         if (isCancelled) return;
 
-        setCompiledBytes(result.pdfBytes);
-        onCompiledBytesReady?.(result.pdfBytes);
+        const safeCompiled = new Uint8Array(result.pdfBytes.slice());
+        setCompiledBytes(safeCompiled);
+        onCompiledBytesReady?.(new Uint8Array(safeCompiled.slice()));
       } catch (err: unknown) {
         if (isCancelled) return;
         const msg = err instanceof Error ? err.message : 'Packet compilation failed';
@@ -137,7 +189,19 @@ export const PreSubmitInvoicePreviewModal: React.FC<PreSubmitInvoicePreviewModal
     return () => {
       isCancelled = true;
     };
-  }, [isOpen, invoiceFile, receiptFile, supportingFiles, certificate, poSites, reviewerName, precompiledBytes]);
+  }, [
+    isOpen,
+    invoiceFile,
+    primaryDocStoragePath,
+    receiptFile,
+    receiptDocStoragePath,
+    supportingFiles,
+    supportingDocStoragePaths,
+    certificate,
+    poSites,
+    reviewerName,
+    precompiledBytes,
+  ]);
 
   if (!isOpen) return null;
 

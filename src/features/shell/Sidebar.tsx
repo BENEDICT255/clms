@@ -10,6 +10,7 @@ import {
   BarChart3,
   Settings,
   Bell,
+  Workflow,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -213,6 +214,18 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
               >
                 <Bell size={18} className="clms-sidebar__link-icon" />
                 {!isCollapsed && <span>Notifications</span>}
+              </NavLink>
+            </li>
+            <li>
+              <NavLink
+                to="/po-lifecycle"
+                className={({ isActive }) =>
+                  `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
+                }
+                title={isCollapsed ? 'PO Lifecycle' : undefined}
+              >
+                <Workflow size={18} className="clms-sidebar__link-icon" />
+                {!isCollapsed && <span>PO Lifecycle</span>}
               </NavLink>
             </li>
             {can('config.manage') && (

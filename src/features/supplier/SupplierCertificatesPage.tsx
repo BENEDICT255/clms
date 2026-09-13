@@ -91,7 +91,13 @@ export function SupplierCertificatesPage() {
       header: 'Status',
       align: 'center',
       width: '120px',
-      cell: (row) => <StatusBadge status={row.status} size="sm" />,
+      cell: (row) => (
+        <StatusBadge
+          status={row.isInvoiced ? 'INVOICED' : row.status}
+          label={row.isInvoiced ? 'INVOICED' : undefined}
+          size="sm"
+        />
+      ),
     },
     {
       header: 'Issued Date',
@@ -104,7 +110,7 @@ export function SupplierCertificatesPage() {
       align: 'center',
       width: '240px',
       cell: (row) => (
-        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'center', alignItems: 'center' }}>
           <Button
             variant="secondary"
             size="sm"
@@ -116,16 +122,38 @@ export function SupplierCertificatesPage() {
           >
             View Certificate
           </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenCreateInvoice(row);
-            }}
-          >
-            Create Invoice
-          </Button>
+          {row.isInvoiced ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                padding: '4px 10px',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 'var(--font-weight-medium)',
+                color: 'var(--color-text-secondary)',
+                backgroundColor: 'var(--color-surface-hover)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-xs)',
+                cursor: 'default',
+                userSelect: 'none',
+              }}
+              title={row.invoiceNumber ? `Invoiced: ${row.invoiceNumber}` : 'Certificate already invoiced'}
+            >
+              Invoiced
+            </span>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenCreateInvoice(row);
+              }}
+            >
+              Create Invoice
+            </Button>
+          )}
         </div>
       ),
     },

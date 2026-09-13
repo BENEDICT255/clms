@@ -13,6 +13,7 @@ import { FinancePage } from '@/features/finance/FinancePage';
 import { ManagementPage } from '@/features/management/ManagementPage';
 import { AdminPage } from '@/features/admin/AdminPage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
+import { POLifecyclePage } from '@/features/po-lifecycle/POLifecyclePage';
 import { NotFoundPage } from '@/features/common/NotFoundPage';
 
 export function AppRouter() {
@@ -97,6 +98,7 @@ export function AppRouter() {
           }
         />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="po-lifecycle" element={<POLifecyclePage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

@@ -1,0 +1,784 @@
+/* ==============================================================================
+   CLMS ROLE DASHBOARD STYLES (DESIGN.md v1.2 FROZEN)
+   ==============================================================================
+   Disciplined, enterprise visual language:
+   - Calm surfaces: white cards, hairline borders
+   - Tabular numerals for all financial values and counts
+   - Restrained Helios Orange (#F37021) for primary interactive highlights
+   - Subtle semantic text colors over large colored pills
+   - Consistent hover/focus states across cards, progress rows, and attention lists
+   ============================================================================== */
+
+/* Layout Containers */
+.clms-role-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding-bottom: var(--space-10);
+}
+
+.clms-role-dashboard__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.clms-role-dashboard__header-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.clms-role-dashboard__title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: var(--letter-spacing-tight);
+}
+
+.clms-role-dashboard__subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.clms-role-dashboard__header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.clms-role-dashboard__fy-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-border-hairline);
+  border-radius: var(--radius-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 4 Concise Top Metrics Grid */
+.clms-role-dashboard__metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 1024px) {
+  .clms-role-dashboard__metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .clms-role-dashboard__metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Metric Card */
+.clms-dashboard-metric-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-border-hairline);
+  border-radius: var(--radius-sm);
+  min-height: 90px;
+  position: relative;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.clms-dashboard-metric-card--clickable {
+  cursor: pointer;
+}
+
+.clms-dashboard-metric-card--clickable:hover {
+  border-color: var(--color-border-medium);
+  background-color: var(--color-surface-hover);
+}
+
+.clms-dashboard-metric-card--clickable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--color-brand-primary);
+}
+
+.clms-dashboard-metric-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.clms-dashboard-metric-card__value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-tight);
+}
+
+.clms-dashboard-metric-card__value--brand {
+  color: var(--color-brand-primary);
+}
+
+.clms-dashboard-metric-card__value--danger {
+  color: var(--color-status-danger-text);
+}
+
+.clms-dashboard-metric-card__value--success {
+  color: var(--color-status-success-text);
+}
+
+.clms-dashboard-metric-card__chevron {
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.clms-dashboard-metric-card--clickable:hover .clms-dashboard-metric-card__chevron {
+  color: var(--color-brand-primary);
+  transform: translateX(2px);
+}
+
+.clms-dashboard-metric-card__label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.clms-dashboard-metric-card__title {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-regular);
+}
+
+.clms-dashboard-metric-card__subvalue {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.clms-dashboard-metric-card__progress-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.clms-dashboard-metric-card__progress-pct {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  min-width: 28px;
+}
+
+.clms-dashboard-metric-card__progress-bar {
+  flex: 1;
+  height: 4px;
+  background-color: var(--color-surface-inset);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.clms-dashboard-metric-card__progress-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width var(--transition-normal);
+}
+
+.clms-dashboard-metric-card__progress-fill--brand {
+  background-color: var(--color-brand-primary);
+}
+
+.clms-dashboard-metric-card__progress-fill--neutral {
+  background-color: var(--color-text-tertiary);
+}
+
+.clms-dashboard-metric-card__progress-fill--success {
+  background-color: var(--color-status-success-text);
+}
+
+.clms-dashboard-metric-card__progress-fill--danger {
+  background-color: var(--color-status-danger-text);
+}
+
+/* Middle Section: 2 Columns (1 Primary Visual + 1 Attention List) */
+.clms-role-dashboard__middle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+@media (max-width: 960px) {
+  .clms-role-dashboard__middle-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Dashboard Card Container */
+.clms-dashboard-card {
+  background-color: var(--color-surface-card);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+}
+
+.clms-dashboard-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-hairline);
+}
+
+.clms-dashboard-card__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.clms-dashboard-card__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: none;
+  border: none;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-brand-primary);
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--transition-fast);
+}
+
+.clms-dashboard-card__action:hover {
+  color: var(--color-brand-hover);
+}
+
+.clms-dashboard-card__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-subtle);
+  border-radius: var(--radius-xs);
+}
+
+.clms-dashboard-card__action-icon {
+  transition: transform var(--transition-fast);
+}
+
+.clms-dashboard-card__action:hover .clms-dashboard-card__action-icon {
+  transform: translateX(2px);
+}
+
+.clms-dashboard-card__body {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+}
+
+/* Progress Rows (Used in Projects & Finance) */
+.clms-clickable-progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xs);
+  transition: background-color var(--transition-fast);
+}
+
+.clms-clickable-progress-row--clickable {
+  cursor: pointer;
+}
+
+.clms-clickable-progress-row--clickable:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.clms-clickable-progress-row--clickable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.clms-clickable-progress-row__label-group {
+  min-width: 90px;
+}
+
+.clms-clickable-progress-row__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.clms-clickable-progress-row__bar-track {
+  flex: 1;
+  height: 6px;
+  background-color: var(--color-surface-inset);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.clms-clickable-progress-row__bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width var(--transition-normal);
+}
+
+.clms-clickable-progress-row__bar-fill--brand {
+  background-color: var(--color-brand-primary);
+}
+
+.clms-clickable-progress-row__bar-fill--neutral {
+  background-color: var(--color-border-medium);
+}
+
+.clms-clickable-progress-row__bar-fill--success {
+  background-color: var(--color-status-success-text);
+}
+
+.clms-clickable-progress-row__bar-fill--warning {
+  background-color: var(--color-status-pending-text);
+}
+
+.clms-clickable-progress-row__bar-fill--danger {
+  background-color: var(--color-status-danger-text);
+}
+
+.clms-clickable-progress-row__values {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 140px;
+  justify-content: flex-end;
+}
+
+.clms-clickable-progress-row__percentage {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  min-width: 32px;
+  text-align: right;
+}
+
+.clms-clickable-progress-row__amount {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+/* Projects Stacked Progress Bar */
+.clms-projects-progress-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.clms-projects-progress-stacked__track {
+  display: flex;
+  height: 14px;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  background-color: var(--color-surface-inset);
+  border: 1px solid var(--color-border-hairline);
+}
+
+.clms-projects-progress-stacked__segment {
+  height: 100%;
+  transition: width var(--transition-normal);
+}
+
+.clms-projects-progress-stacked__segment--certified {
+  background-color: var(--color-brand-primary);
+}
+
+.clms-projects-progress-stacked__segment--remaining {
+  background-color: var(--color-border-subtle);
+}
+
+.clms-projects-progress-stacked__legend {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+.clms-projects-progress-stacked__legend-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.clms-projects-progress-stacked__legend-value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.clms-projects-progress-stacked__legend-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.clms-projects-progress-stacked__legend-pct {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* Pipeline Bars (Supplier & Supply Chain) */
+.clms-pipeline-bar-group {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  min-height: 140px;
+}
+
+.clms-pipeline-bar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  max-width: 72px;
+  padding: var(--space-1);
+  border-radius: var(--radius-xs);
+  transition: background-color var(--transition-fast);
+}
+
+.clms-pipeline-bar-item--clickable {
+  cursor: pointer;
+}
+
+.clms-pipeline-bar-item--clickable:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.clms-pipeline-bar-item--clickable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.clms-pipeline-bar-item__count {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.clms-pipeline-bar-item__track {
+  width: 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background-color: var(--color-surface-inset);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.clms-pipeline-bar-item__bar {
+  width: 100%;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  transition: height var(--transition-normal);
+}
+
+.clms-pipeline-bar-item__bar--brand {
+  background-color: var(--color-brand-primary);
+}
+
+.clms-pipeline-bar-item__bar--neutral {
+  background-color: var(--color-border-medium);
+}
+
+.clms-pipeline-bar-item__bar--warning {
+  background-color: var(--color-status-pending-text);
+}
+
+.clms-pipeline-bar-item__bar--danger {
+  background-color: var(--color-status-danger-text);
+}
+
+.clms-pipeline-bar-item__bar--success {
+  background-color: var(--color-status-success-text);
+}
+
+.clms-pipeline-bar-item__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-align: center;
+  line-height: var(--line-height-tight);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  height: 24px;
+}
+
+/* Attention List */
+.clms-attention-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.clms-attention-list__empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background-color: var(--color-surface-inset);
+  border-radius: var(--radius-xs);
+}
+
+.clms-attention-list__empty-icon {
+  color: var(--color-status-success-text);
+}
+
+.clms-attention-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-xs);
+  border: 1px solid transparent;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.clms-attention-item--clickable {
+  cursor: pointer;
+}
+
+.clms-attention-item--clickable:hover {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border-hairline);
+}
+
+.clms-attention-item--clickable:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--color-brand-primary);
+}
+
+.clms-attention-item__left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.clms-attention-item__icon {
+  flex-shrink: 0;
+}
+
+.clms-attention-item__icon--brand {
+  color: var(--color-brand-primary);
+}
+
+.clms-attention-item__icon--danger {
+  color: var(--color-status-danger-text);
+}
+
+.clms-attention-item__icon--warning {
+  color: var(--color-status-pending-text);
+}
+
+.clms-attention-item__icon--success {
+  color: var(--color-status-success-text);
+}
+
+.clms-attention-item__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clms-attention-item__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.clms-attention-item__count {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.clms-attention-item__chevron {
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.clms-attention-item--clickable:hover .clms-attention-item__chevron {
+  color: var(--color-brand-primary);
+  transform: translateX(2px);
+}
+
+/* Status Text (Quiet text + dot, no giant pill) */
+.clms-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+}
+
+.clms-status-text__dot {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.clms-status-text--completed,
+.clms-status-text--approved,
+.clms-status-text--settled {
+  color: var(--color-status-success-text);
+}
+
+.clms-status-text--overdue,
+.clms-status-text--returned {
+  color: var(--color-status-danger-text);
+}
+
+.clms-status-text--due,
+.clms-status-text--in_progress,
+.clms-status-text--submitted {
+  color: var(--color-brand-primary);
+}
+
+.clms-status-text--partial {
+  color: var(--color-status-pending-text);
+}
+
+.clms-status-text--not_started,
+.clms-status-text--draft {
+  color: var(--color-text-secondary);
+}
+
+/* Operational Table Inside Dashboard */
+.clms-dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+}
+
+.clms-dashboard-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-hairline);
+  background-color: var(--color-surface-inset);
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.clms-dashboard-table td {
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--color-border-hairline);
+  color: var(--color-text-primary);
+  vertical-align: middle;
+}
+
+.clms-dashboard-table tr:last-child td {
+  border-bottom: none;
+}
+
+.clms-dashboard-table tbody tr {
+  transition: background-color var(--transition-fast);
+}
+
+.clms-dashboard-table tbody tr.clms-dashboard-table__row--clickable {
+  cursor: pointer;
+}
+
+.clms-dashboard-table tbody tr.clms-dashboard-table__row--clickable:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.clms-dashboard-table__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: none;
+  border: none;
+  color: var(--color-brand-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-xs);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.clms-dashboard-table__action-btn:hover {
+  background-color: var(--color-brand-subtle);
+  color: var(--color-brand-hover);
+}
+
+.clms-dashboard-table__action-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-subtle);
+}
+
+.clms-dashboard-table__code-link {
+  font-family: var(--font-family-mono);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-brand-primary);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.clms-dashboard-table__code-link:hover {
+  text-decoration: underline;
+}
+
+/* Role Selector Tabs (For System Admin / Multi-Role Users) */
+.clms-role-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background-color: var(--color-surface-inset);
+  border: 1px solid var(--color-border-hairline);
+  border-radius: var(--radius-xs);
+}
+
+.clms-role-selector-tab {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.clms-role-selector-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.clms-role-selector-tab--active {
+  background-color: var(--color-surface-card);
+  color: var(--color-brand-primary);
+  font-weight: var(--font-weight-semibold);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.clms-role-selector-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-subtle);
+}

@@ -16,12 +16,15 @@ import { supabase } from '@/infrastructure/supabase/client';
 import { documentStorageService } from '@/infrastructure/storage/DocumentStorageService';
 
 export interface PoSiteDetail {
+  id?: string | undefined;
   siteIdExt: string;
   siteName: string;
-  region?: string;
+  region?: string | undefined;
   authorizedAmount: number;
-  currentAmount?: number;
-  percentage?: number;
+  currentAmount?: number | undefined;
+  percentage?: number | undefined;
+  scopeDescription?: string | undefined;
+  rfiDate?: string | undefined;
 }
 
 export interface CertificatePacketParams {
@@ -44,14 +47,66 @@ function formatMoney(amount: number): string {
   }).format(amount);
 }
 
+function formatShortDate(dStr?: string): string {
+  if (!dStr) return '—';
+  const d = new Date(dStr);
+  if (isNaN(d.getTime())) return dStr;
+  const day = d.getDate();
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const m = months[d.getMonth()];
+  const yr = String(d.getFullYear()).slice(-2);
+  return `${day}-${m}-${yr}`;
+}
+
+function wrapText(
+  text: string,
+  maxWidth: number,
+  font: { widthOfTextAtSize: (t: string, s: number) => number },
+  fontSize: number
+): string[] {
+  if (!text) return [];
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+    if (testWidth <= maxWidth) {
+      currentLine = testLine;
+    } else {
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        let part = '';
+        for (const ch of word) {
+          if (font.widthOfTextAtSize(part + ch, fontSize) <= maxWidth) {
+            part += ch;
+          } else {
+            if (part) lines.push(part);
+            part = ch;
+          }
+        }
+        currentLine = part;
+      }
+    }
+  }
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  return lines;
+}
+
+
 let cachedLogoBytes: ArrayBuffer | null = null;
 const poDocBytesCache = new Map<string, ArrayBuffer>();
 
 async function getHeliosLogoBytes(): Promise<ArrayBuffer | null> {
   if (cachedLogoBytes) return cachedLogoBytes;
-  if (typeof window !== 'undefined') {
+  if (typeof globalThis.fetch === 'function') {
     try {
-      const res = await fetch('/assets/helios_logo.png');
+      const res = await globalThis.fetch('/assets/helios_logo.png');
       if (res.ok) {
         cachedLogoBytes = await res.arrayBuffer();
         return cachedLogoBytes;
@@ -368,6 +423,67 @@ export class CertificatePacketService {
       color: rgb(0.7, 0.7, 0.7),
     });
 
+    const drawCellText = (
+      text: string,
+      startX: number,
+      currentY: number,
+      maxW: number,
+      font: any = fontRegular,
+      preferredSize = 7.5,
+      color = rgb(0.1, 0.1, 0.1)
+    ) => {
+      if (!text) return;
+      let size = preferredSize;
+      let lines = wrapText(text, maxW, font, size);
+
+      if (lines.length > 2) {
+        const smaller = wrapText(text, maxW, font, 6.5);
+        if (smaller.length <= 2) {
+          size = 6.5;
+          lines = smaller;
+        } else {
+          size = 6.5;
+          lines = smaller.slice(0, 2);
+          const lastLine = lines[1];
+          if (smaller.length > 2 && lastLine) {
+            let elLine = lastLine;
+            while (elLine.length > 0 && font.widthOfTextAtSize(elLine + '...', size) > maxW) {
+              elLine = elLine.slice(0, -1);
+            }
+            lines[1] = elLine + '...';
+          }
+        }
+      }
+
+      const lineHeight = size + 2;
+      if (lines.length === 1) {
+        page1.drawText(lines[0], {
+          x: startX,
+          y: currentY + (rowH - size) / 2 + 1,
+          size,
+          font,
+          color,
+        });
+      } else if (lines.length === 2) {
+        const totalTextH = size + lineHeight;
+        const topMargin = (rowH - totalTextH) / 2;
+        page1.drawText(lines[0], {
+          x: startX,
+          y: currentY + rowH - topMargin - size,
+          size,
+          font,
+          color,
+        });
+        page1.drawText(lines[1], {
+          x: startX,
+          y: currentY + rowH - topMargin - size - lineHeight,
+          size,
+          font,
+          color,
+        });
+      }
+    };
+
     gridRows.forEach((row, i) => {
       const currentY = boxY + boxH - (i + 1) * rowH;
       if (i > 0) {
@@ -389,13 +505,9 @@ export class CertificatePacketService {
       });
 
       // Val 1
-      page1.drawText(row.val1, {
-        x: boxX + 130,
-        y: currentY + (rowH - 8) / 2 + 1,
-        size: 7.5,
-        font: fontRegular,
-        color: rgb(0.1, 0.1, 0.1),
-      });
+      const val1X = boxX + 118;
+      const maxVal1W = row.span2 ? (boxX + boxW) - val1X - 8 : col2X - val1X - 8;
+      drawCellText(row.val1, val1X, currentY, maxVal1W, fontRegular, 7.5, rgb(0.1, 0.1, 0.1));
 
       if (!row.span2 && row.label2 && row.val2) {
         // Label 2
@@ -408,15 +520,12 @@ export class CertificatePacketService {
         });
 
         // Val 2
-        page1.drawText(row.val2, {
-          x: col2X + 130,
-          y: currentY + (rowH - 8) / 2 + 1,
-          size: 7.5,
-          font: fontRegular,
-          color: rgb(0.1, 0.1, 0.1),
-        });
+        const val2X = col2X + 118;
+        const maxVal2W = (boxX + boxW) - val2X - 8;
+        drawCellText(row.val2, val2X, currentY, maxVal2W, fontRegular, 7.5, rgb(0.1, 0.1, 0.1));
       }
     });
+
 
     // Authoritative Commercial Terms Clause — Section 12: Proper terminology
     const conditionText = isFac
@@ -463,139 +572,428 @@ export class CertificatePacketService {
     });
 
     // =========================================================================
-    // PAGE 2: Commercial Site Allocations Table & Sign-Offs
+    // PAGE 2: LIST OF ACCEPTED SITES (Canonical Helios Towers Format)
+    // Dimensions: A4 Portrait (595.28 x 841.89 pt)
     // =========================================================================
     const page2 = pdfDoc.addPage([595.28, 841.89]);
     const { width: p2W, height: p2H } = page2.getSize();
 
-    page2.drawText('Site Allocations & Certification Schedule', {
-      x: 48,
-      y: p2H - 50,
-      size: 13,
-      font: fontBold,
-      color: rgb(0.1, 0.1, 0.1),
-    });
+    const tblLeft = 40;
+    const tblWidth = 515;
 
-    page2.drawText(`Certificate Ref: ${certificate.certificateNumber} | PO: ${certificate.poNumber}`, {
-      x: 48,
-      y: p2H - 68,
-      size: 8,
-      font: fontRegular,
-      color: rgb(0.4, 0.4, 0.4),
-    });
-
-    // Table Headers
-    const tblX = 48;
-    let tblY = p2H - 100;
-    const tblW = p2W - 96;
-
-    page2.drawRectangle({
-      x: tblX,
-      y: tblY,
-      width: tblW,
-      height: 20,
-      color: rgb(0.93, 0.93, 0.93),
-      borderColor: rgb(0.7, 0.7, 0.7),
-      borderWidth: 1,
-    });
-
-    page2.drawText('#', { x: tblX + 6, y: tblY + 6, size: 7.5, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
-    page2.drawText('Site ID', { x: tblX + 30, y: tblY + 6, size: 7.5, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
-    page2.drawText('Site Name', { x: tblX + 110, y: tblY + 6, size: 7.5, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
-    page2.drawText('Region', { x: tblX + 250, y: tblY + 6, size: 7.5, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
-    page2.drawText('Allocated Value (TZS)', { x: tblX + 350, y: tblY + 6, size: 7.5, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
-    page2.drawText('Cert %', { x: tblX + 460, y: tblY + 6, size: 7.5, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
-
-    tblY -= 18;
-    const displaySites = poSites.length > 0 ? poSites : (certificate.sites || []);
-
-    displaySites.slice(0, 25).forEach((s, idx) => {
-      page2.drawLine({
-        start: { x: tblX, y: tblY + 18 },
-        end: { x: tblX + tblW, y: tblY + 18 },
-        thickness: 0.5,
-        color: rgb(0.85, 0.85, 0.85),
+    // 1. Top Right Corporate Logo
+    if (logoImage) {
+      const logoDims = logoImage.scale(0.18);
+      page2.drawImage(logoImage, {
+        x: tblLeft + tblWidth - logoDims.width,
+        y: p2H - 45 - logoDims.height,
+        width: logoDims.width,
+        height: logoDims.height,
       });
+    }
 
-      page2.drawText(String(idx + 1), { x: tblX + 6, y: tblY + 4, size: 7, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
-      page2.drawText(s.siteIdExt || '—', { x: tblX + 30, y: tblY + 4, size: 7, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-      page2.drawText(s.siteName || '—', { x: tblX + 110, y: tblY + 4, size: 7, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-      page2.drawText(s.region || '—', { x: tblX + 250, y: tblY + 4, size: 7, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
-      page2.drawText(formatMoney(s.authorizedAmount || 0), { x: tblX + 350, y: tblY + 4, size: 7, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-      page2.drawText(s.percentage ? `${s.percentage}%` : `${certPct}%`, { x: tblX + 460, y: tblY + 4, size: 7, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-
-      tblY -= 18;
-    });
-
-    // Total line
-    page2.drawLine({
-      start: { x: tblX, y: tblY + 18 },
-      end: { x: tblX + tblW, y: tblY + 18 },
-      thickness: 1,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-
-    page2.drawText('Total Certified Commitment:', {
-      x: tblX + 180,
-      y: tblY + 4,
-      size: 8,
-      font: fontBold,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-    page2.drawText(`${certificate.currency} ${formatMoney(certificate.currentCertifiedAmount)}`, {
-      x: tblX + 350,
-      y: tblY + 4,
-      size: 8,
+    // 2. Centered Document Title
+    const p2Title = 'LIST OF ACCEPTED SITES';
+    const p2TitleW = fontBold.widthOfTextAtSize(p2Title, 11);
+    page2.drawText(p2Title, {
+      x: (p2W - p2TitleW) / 2,
+      y: p2H - 68,
+      size: 11,
       font: fontBold,
       color: rgb(0.1, 0.1, 0.1),
     });
 
-    // Sign-Off Box on Page 2 Bottom
-    const p2SigBoxY = 60;
-    page2.drawRectangle({
-      x: tblX,
-      y: p2SigBoxY,
-      width: tblW,
-      height: 65,
-      borderColor: rgb(0.7, 0.7, 0.7),
-      borderWidth: 1,
-    });
+    // 3. Top Metadata Boxes (Supplier Details Left, Job Details Right)
+    const p2BoxW = 155;
+    const p2BoxH = 15;
+    const rightBoxX = tblLeft + tblWidth - p2BoxW;
 
-    page2.drawText('Helios Towers Acceptance Review:', {
-      x: tblX + 10,
-      y: p2SigBoxY + 48,
+    page2.drawText('Supplier Details', {
+      x: tblLeft,
+      y: p2H - 88,
       size: 7.5,
       font: fontBold,
       color: rgb(0.1, 0.1, 0.1),
     });
-    page2.drawText(`Authorized Approver: ${authoritativeApprover}`, {
-      x: tblX + 10,
-      y: p2SigBoxY + 30,
-      size: 7,
-      font: fontRegular,
+
+    // Left Boxes: Supplier Details
+    const leftBoxes = [
+      { label: 'Name:', value: certificate.supplierName || 'Prime Power' },
+      { label: 'Supplier ref. no:', value: certificate.supplierId || 'S4.P01007' },
+      { label: 'PO Number:', value: certificate.poNumber || '—' },
+    ];
+    let leftBoxY = p2H - 106;
+    for (const b of leftBoxes) {
+      page2.drawRectangle({
+        x: tblLeft,
+        y: leftBoxY,
+        width: p2BoxW,
+        height: p2BoxH,
+        borderColor: rgb(0.3, 0.3, 0.3),
+        borderWidth: 0.6,
+      });
+      page2.drawText(b.label, {
+        x: tblLeft + 4,
+        y: leftBoxY + 4.5,
+        size: 6.5,
+        font: fontRegular,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+      const valX = tblLeft + fontRegular.widthOfTextAtSize(b.label, 6.5) + 8;
+      page2.drawText(b.value.slice(0, 24), {
+        x: valX,
+        y: leftBoxY + 4.5,
+        size: 6.5,
+        font: fontBold,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+      leftBoxY -= 17;
+    }
+
+    // Right Boxes: Job & Certificate Metadata
+    const statusText = certificate.status === 'ISSUED' || certificate.status === 'APPROVED' ? 'COMPLETED' : 'OPEN';
+    const rightBoxes = [
+      { label: 'Department :', value: 'PROJECTS' },
+      { label: 'Job Completion Status:', value: statusText },
+      { label: 'Certificate Ref. No. :', value: certificate.certificateNumber || '—' },
+    ];
+    let rightBoxY = p2H - 106;
+    for (const b of rightBoxes) {
+      page2.drawRectangle({
+        x: rightBoxX,
+        y: rightBoxY,
+        width: p2BoxW,
+        height: p2BoxH,
+        borderColor: rgb(0.3, 0.3, 0.3),
+        borderWidth: 0.6,
+      });
+      page2.drawText(b.label, {
+        x: rightBoxX + 4,
+        y: rightBoxY + 4.5,
+        size: 6.5,
+        font: fontRegular,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+      const valX = rightBoxX + fontRegular.widthOfTextAtSize(b.label, 6.5) + 8;
+      page2.drawText(b.value.slice(0, 24), {
+        x: valX,
+        y: rightBoxY + 4.5,
+        size: 6.5,
+        font: fontBold,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+      rightBoxY -= 17;
+    }
+
+    // 4. Services Details Section Header
+    page2.drawText('Services Details:', {
+      x: tblLeft,
+      y: p2H - 162,
+      size: 7.5,
+      font: fontBold,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+
+    // 5. Table Grid Columns Setup
+    const columns: Array<{
+      key: string;
+      label: string;
+      width: number;
+      align: 'left' | 'center' | 'right';
+    }> = [
+      { key: 'item', label: 'ITEM(QTY)', width: 25, align: 'center' },
+      { key: 'siteId', label: 'SITE ID', width: 48, align: 'left' },
+      { key: 'siteName', label: 'SITE NAME', width: 70, align: 'left' },
+      { key: 'desc', label: 'DESCRIPTION', width: 50, align: 'left' },
+      { key: 'rfiDate', label: 'RFI Date', width: 44, align: 'center' },
+      { key: 'poAmt', label: 'PO AMOUNT', width: 58, align: 'right' },
+      { key: 'dpcAmt', label: 'DPC AMOUNT', width: 42, align: 'right' },
+      { key: 'pacAmt', label: 'PAC AMOUNT', width: 44, align: 'right' },
+      { key: 'facAmt', label: 'FAC AMOUNT', width: 48, align: 'right' },
+      { key: 'invAmt', label: 'INVOICE AMOUNT', width: 50, align: 'right' },
+      { key: 'status', label: 'STATUS', width: 36, align: 'center' },
+    ];
+
+    const tableTopY = p2H - 176;
+    const headerH = 15;
+
+    // Draw Table Header Row
+    let curX = tblLeft;
+    for (const col of columns) {
+      page2.drawRectangle({
+        x: curX,
+        y: tableTopY - headerH,
+        width: col.width,
+        height: headerH,
+        borderColor: rgb(0.2, 0.2, 0.2),
+        borderWidth: 0.6,
+        color: rgb(0.97, 0.97, 0.97),
+      });
+
+      const txtW = fontBold.widthOfTextAtSize(col.label, 5.2);
+      let textX = curX + 2;
+      if (col.align === 'center') {
+        textX = curX + (col.width - txtW) / 2;
+      } else if (col.align === 'right') {
+        textX = curX + col.width - txtW - 3;
+      }
+
+      page2.drawText(col.label, {
+        x: textX,
+        y: tableTopY - headerH + 5,
+        size: 5.2,
+        font: fontBold,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+
+      curX += col.width;
+    }
+
+    // 6. Data Rows
+    const allSites: PoSiteDetail[] = (poSites && poSites.length > 0)
+      ? poSites
+      : (certificate.sites || []).map((cs) => ({
+          id: cs.poSiteId,
+          siteIdExt: cs.siteIdExt,
+          siteName: cs.siteName,
+          region: cs.region,
+          authorizedAmount: cs.authorizedAmount,
+          currentAmount: cs.currentAmount,
+          percentage: cs.percentage,
+        }));
+
+    const p2RowH = allSites.length > 18 ? 11 : 13;
+    let rowY = tableTopY - headerH - p2RowH;
+    const certIssueDate = formatShortDate(certificate.issuedAt || certificate.createdAt);
+
+    allSites.forEach((site, idx) => {
+      // Reconcile: identify if this site was selected/certified in THIS certificate
+      const certAlloc = certificate.sites?.find(
+        (cs) => cs.siteIdExt === site.siteIdExt || (site.id && cs.poSiteId === site.id)
+      );
+      const isCertified = !!certAlloc && (certAlloc.currentAmount > 0 || (certAlloc.percentage && certAlloc.percentage > 0));
+      const certVal = certAlloc
+        ? (certAlloc.currentAmount || (site.authorizedAmount * (certAlloc.percentage / 100)))
+        : 0;
+
+      const desc = site.scopeDescription || (site.siteName?.toLowerCase().includes('concrete') ? 'Concrete' : 'Geotextile');
+      const rfi = site.rfiDate || certIssueDate;
+
+      // Only invoiced/certified sites display values in milestone and invoice amount columns!
+      const rowValues: Record<string, string> = {
+        item: String(idx + 1),
+        siteId: site.siteIdExt || '—',
+        siteName: (site.siteName || '—').slice(0, 16),
+        desc: desc.slice(0, 13),
+        rfiDate: rfi,
+        poAmt: `TZS ${formatMoney(site.authorizedAmount || 0)}`,
+        dpcAmt: isDpc && isCertified ? `TZS ${formatMoney(certVal)}` : '',
+        pacAmt: !isFac && !isDpc && isCertified ? `TZS ${formatMoney(certVal)}` : '',
+        facAmt: isFac && isCertified ? `TZS ${formatMoney(certVal)}` : '',
+        invAmt: isCertified ? `TZS ${formatMoney(certVal)}` : '',
+        status: 'Not paid',
+      };
+
+      let cellX = tblLeft;
+      for (const col of columns) {
+        page2.drawRectangle({
+          x: cellX,
+          y: rowY,
+          width: col.width,
+          height: p2RowH,
+          borderColor: rgb(0.3, 0.3, 0.3),
+          borderWidth: 0.5,
+        });
+
+        const val = rowValues[col.key] || '';
+        if (val) {
+          const fontSize = col.key.includes('Amt') ? 5 : 5.5;
+          const isBoldCol = col.key === 'siteId';
+          const f = isBoldCol ? fontBold : fontRegular;
+          const txtW = f.widthOfTextAtSize(val, fontSize);
+
+          let tX = cellX + 2;
+          if (col.align === 'center') {
+            tX = cellX + (col.width - txtW) / 2;
+          } else if (col.align === 'right') {
+            tX = cellX + col.width - txtW - 2.5;
+          }
+
+          page2.drawText(val, {
+            x: tX,
+            y: rowY + (p2RowH - fontSize) / 2 + 0.5,
+            size: fontSize,
+            font: f,
+            color: rgb(0.1, 0.1, 0.1),
+          });
+        }
+
+        cellX += col.width;
+      }
+
+      rowY -= p2RowH;
+    });
+
+    // 7. TOTAL AMOUNT EXCLUDING VAT Row
+    const totRowH = 14;
+    const leftColsWidth = columns.slice(0, 5).reduce((sum, c) => sum + c.width, 0);
+
+    page2.drawRectangle({
+      x: tblLeft,
+      y: rowY,
+      width: leftColsWidth,
+      height: totRowH,
+      borderColor: rgb(0.2, 0.2, 0.2),
+      borderWidth: 0.6,
+      color: rgb(0.97, 0.97, 0.97),
+    });
+
+    page2.drawText('TOTAL AMOUNT EXCLUDING VAT', {
+      x: tblLeft + 15,
+      y: rowY + (totRowH - 5.5) / 2 + 0.5,
+      size: 5.5,
+      font: fontBold,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+
+    const totalPoAuth = allSites.reduce((sum, s) => sum + (s.authorizedAmount || 0), 0) ||
+      certificate.poAuthorizedAmount ||
+      certificate.currentCertifiedAmount;
+
+    const totCols = [
+      { width: 58, val: `TZS ${formatMoney(totalPoAuth)}` },
+      { width: 42, val: isDpc ? `TZS ${formatMoney(certificate.currentCertifiedAmount)}` : 'TZS 0.00' },
+      { width: 44, val: (!isFac && !isDpc) ? `TZS ${formatMoney(certificate.currentCertifiedAmount)}` : 'TZS 0.00' },
+      { width: 48, val: isFac ? `TZS ${formatMoney(certificate.currentCertifiedAmount)}` : 'TZS 0.00' },
+      { width: 50, val: `TZS ${formatMoney(certificate.currentCertifiedAmount)}` },
+      { width: 36, val: '' },
+    ];
+
+    let totCellX = tblLeft + leftColsWidth;
+    for (const tc of totCols) {
+      page2.drawRectangle({
+        x: totCellX,
+        y: rowY,
+        width: tc.width,
+        height: totRowH,
+        borderColor: rgb(0.2, 0.2, 0.2),
+        borderWidth: 0.6,
+        color: rgb(0.97, 0.97, 0.97),
+      });
+
+      if (tc.val) {
+        const txtW = fontBold.widthOfTextAtSize(tc.val, 5);
+        page2.drawText(tc.val, {
+          x: totCellX + tc.width - txtW - 2.5,
+          y: rowY + (totRowH - 5) / 2 + 0.5,
+          size: 5,
+          font: fontBold,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+      }
+
+      totCellX += tc.width;
+    }
+
+    rowY -= totRowH;
+
+    // 8. Remarks Box
+    const remarksY = rowY - 18;
+    const remarksH = 20;
+    page2.drawRectangle({
+      x: tblLeft,
+      y: remarksY,
+      width: tblWidth,
+      height: remarksH,
+      borderColor: rgb(0.3, 0.3, 0.3),
+      borderWidth: 0.6,
+    });
+    page2.drawText('Remarks:', {
+      x: tblLeft + 4,
+      y: remarksY + remarksH - 8,
+      size: 6.5,
+      font: fontBold,
       color: rgb(0.2, 0.2, 0.2),
     });
-    page2.drawText(`Status: ${certificate.status}`, {
-      x: tblX + 10,
-      y: p2SigBoxY + 14,
+
+    // 9. Sign-Offs (Accepted by QA Left, Reviewed by Right)
+    const sigSectionY = remarksY - 14;
+    const sigBoxH = 11;
+    const sigBoxW = 150;
+
+    // Left: Accepted by (QA)
+    page2.drawText('Accepted by (QA):', {
+      x: tblLeft,
+      y: sigSectionY,
       size: 7,
-      font: fontRegular,
-      color: rgb(0.2, 0.2, 0.2),
+      font: fontBold,
+      color: rgb(0.1, 0.1, 0.1),
     });
-    page2.drawText('Signature: _______________________________', {
-      x: tblX + 260,
-      y: p2SigBoxY + 30,
+
+    const qaFields = ['Name:', 'Signature:', 'Date:'];
+    let qaY = sigSectionY - 14;
+    for (const f of qaFields) {
+      page2.drawRectangle({
+        x: tblLeft,
+        y: qaY,
+        width: sigBoxW,
+        height: sigBoxH,
+        borderColor: rgb(0.3, 0.3, 0.3),
+        borderWidth: 0.5,
+      });
+      page2.drawText(f, {
+        x: tblLeft + 4,
+        y: qaY + 3,
+        size: 6.5,
+        font: fontRegular,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+      qaY -= 12;
+    }
+
+    // Right: Reviewed by
+    const rightSigX = tblLeft + tblWidth - sigBoxW;
+    page2.drawText('Reviewed by:', {
+      x: rightSigX,
+      y: sigSectionY,
       size: 7,
-      font: fontRegular,
-      color: rgb(0.3, 0.3, 0.3),
+      font: fontBold,
+      color: rgb(0.1, 0.1, 0.1),
     });
-    page2.drawText(`Date: ${dateStr}`, {
-      x: tblX + 260,
-      y: p2SigBoxY + 14,
-      size: 7,
-      font: fontRegular,
-      color: rgb(0.3, 0.3, 0.3),
-    });
+
+    const reviewerFields = [
+      { label: 'Name:', val: authoritativeApprover },
+      { label: 'Signature:', val: '' },
+      { label: 'Date:', val: certIssueDate },
+    ];
+    let revY = sigSectionY - 14;
+    for (const f of reviewerFields) {
+      page2.drawRectangle({
+        x: rightSigX,
+        y: revY,
+        width: sigBoxW,
+        height: sigBoxH,
+        borderColor: rgb(0.3, 0.3, 0.3),
+        borderWidth: 0.5,
+      });
+      page2.drawText(f.label, {
+        x: rightSigX + 4,
+        y: revY + 3,
+        size: 6.5,
+        font: fontRegular,
+        color: rgb(0.2, 0.2, 0.2),
+      });
+      if (f.val) {
+        page2.drawText(f.val.slice(0, 24), {
+          x: rightSigX + 40,
+          y: revY + 3,
+          size: 6.5,
+          font: fontBold,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+      }
+      revY -= 12;
+    }
 
     // =========================================================================
     // PAGES 3 to N: Attach All Pages of the Linked PO Document (Section 13 & 15)

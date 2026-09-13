@@ -28,7 +28,11 @@ export interface CertificateRecord {
   createdAt: string;
   updatedAt: string;
   siteCount: number;
-  poAuthorizedAmount?: number;
+  poAuthorizedAmount?: number | undefined;
+  isInvoiced?: boolean | undefined;
+  invoiceId?: string | undefined;
+  invoiceNumber?: string | undefined;
+  invoiceStatus?: string | undefined;
   sites?: Array<{
     poSiteId: string;
     siteIdExt: string;
@@ -91,6 +95,12 @@ export class CertificateRepository {
                 region
               )
             )
+          ),
+          invoices (
+            id,
+            clms_reference,
+            supplier_invoice_number,
+            status
           )
         `)
         .order('created_at', { ascending: false });
@@ -149,6 +159,12 @@ export class CertificateRepository {
             };
           };
         }>;
+        invoices?: Array<{
+          id: string;
+          clms_reference: string;
+          supplier_invoice_number: string;
+          status: string;
+        }>;
       };
 
       return (data as unknown as CertQueryRow[] || []).map((row) => {
@@ -170,6 +186,17 @@ export class CertificateRepository {
           };
         });
 
+        const activeInvoices = (row.invoices || []).filter(
+          (inv) => inv.status !== 'VOIDED'
+        );
+        const primaryInvoice = activeInvoices[0];
+        const isInvoiced = Boolean(primaryInvoice);
+        const invoiceNumber = primaryInvoice
+          ? (primaryInvoice.supplier_invoice_number && primaryInvoice.supplier_invoice_number !== '—'
+              ? primaryInvoice.supplier_invoice_number
+              : primaryInvoice.clms_reference)
+          : undefined;
+
         return {
           id: row.id,
           certificateNumber: row.certificate_number,
@@ -188,6 +215,10 @@ export class CertificateRepository {
           createdAt: row.created_at,
           updatedAt: row.updated_at,
           siteCount: sites.length,
+          isInvoiced,
+          invoiceId: primaryInvoice?.id,
+          invoiceNumber,
+          invoiceStatus: primaryInvoice?.status,
           sites,
         };
       });
@@ -287,11 +318,12 @@ export class CertificateRepository {
     siteName: string;
     region: string;
     authorizedAmount: number;
+    scopeDescription?: string;
   }>> {
     try {
       const { data, error } = await supabase
         .from('po_sites')
-        .select('id, authorized_amount, sites ( site_id_ext, site_name, region )')
+        .select('id, authorized_amount, scope_description, sites ( site_id_ext, site_name, region )')
         .eq('po_id', poId);
 
       if (error || !data) {
@@ -302,6 +334,7 @@ export class CertificateRepository {
       type PoSiteQueryResult = {
         id: string;
         authorized_amount: number | string;
+        scope_description?: string;
         sites?: { site_id_ext: string; site_name: string; region: string };
       };
 
@@ -311,6 +344,7 @@ export class CertificateRepository {
         siteName: d.sites?.site_name || '—',
         region: d.sites?.region || '—',
         authorizedAmount: Number(d.authorized_amount) || 0,
+        ...(d.scope_description ? { scopeDescription: d.scope_description } : {}),
       }));
     } catch (err) {
       console.warn('getPoSites exception:', err);

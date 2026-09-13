@@ -100,6 +100,9 @@ export function CreateInvoiceModal({
     });
   }, [certificate?.currentCertifiedAmount]);
 
+  // Check if certificate has already been invoiced (non-draft)
+  const isAlreadyFinalInvoiced = Boolean(certificate?.isInvoiced && certificate.invoiceStatus !== 'DRAFT');
+
   // Load existing draft if available
   const loadExistingDraft = useCallback(async () => {
     if (!certificate) return;
@@ -415,31 +418,40 @@ export function CreateInvoiceModal({
     try {
       setStatusStep('Compiling final authoritative commercial submission packet...');
       let finalPacketBytes = cachedPacketBytes;
+      if (finalPacketBytes && (finalPacketBytes.byteLength === 0 || finalPacketBytes.buffer.byteLength === 0)) {
+        finalPacketBytes = null;
+      }
 
       if (!finalPacketBytes) {
         // Read bytes for compilation
         let invBytes: Uint8Array | ArrayBuffer;
-        if (primaryFile) {
+        if (primaryFile && primaryFile.size > 0) {
           invBytes = await primaryFile.arrayBuffer();
-        } else {
-          const blob = await documentStorageService.downloadBlob(primaryDoc!.storagePath);
+        } else if (primaryDoc) {
+          const blob = await documentStorageService.downloadBlob(primaryDoc.storagePath);
           invBytes = await blob.arrayBuffer();
+        } else {
+          throw new Error('Primary Supplier Invoice document is missing.');
         }
 
         const supportingItems: SupportingDocumentItem[] = [];
-        if (receiptFile) {
+        if (receiptFile && receiptFile.size > 0) {
           supportingItems.push({
             fileName: receiptFile.name,
             bytes: await receiptFile.arrayBuffer(),
             documentRole: 'TAX_RECEIPT',
           });
         } else if (receiptDoc) {
-          const blob = await documentStorageService.downloadBlob(receiptDoc.storagePath);
-          supportingItems.push({
-            fileName: receiptDoc.fileName,
-            bytes: await blob.arrayBuffer(),
-            documentRole: 'TAX_RECEIPT',
-          });
+          try {
+            const blob = await documentStorageService.downloadBlob(receiptDoc.storagePath);
+            supportingItems.push({
+              fileName: receiptDoc.fileName,
+              bytes: await blob.arrayBuffer(),
+              documentRole: 'TAX_RECEIPT',
+            });
+          } catch (rErr) {
+            console.warn('[CreateInvoiceModal] Error downloading receipt for packet:', rErr);
+          }
         }
 
         for (const sDoc of supportingDocsList) {
@@ -464,15 +476,16 @@ export function CreateInvoiceModal({
           approverName: user?.fullName,
         });
 
-        finalPacketBytes = compileRes.pdfBytes;
-        setCachedPacketBytes(finalPacketBytes);
+        finalPacketBytes = new Uint8Array(compileRes.pdfBytes.slice());
+        setCachedPacketBytes(new Uint8Array(finalPacketBytes.slice()));
       }
 
       // Persist snapshot to private storage vault (Section 27)
       setStatusStep('Storing immutable submission packet snapshot in commercial vault...');
+      const uploadBytes = new Uint8Array(finalPacketBytes.slice());
       await invoiceRepository.uploadUnifiedInvoicePacket({
         invoiceId: draftInvoiceId,
-        file: finalPacketBytes,
+        file: uploadBytes,
         fileName: `${clmsRef}_Complete_Submission_Packet.pdf`,
         clmsRef,
       });
@@ -531,7 +544,7 @@ export function CreateInvoiceModal({
               <Button
                 variant="secondary"
                 size="md"
-                disabled={isSubmitting || isSavingDraft}
+                disabled={isSubmitting || isSavingDraft || isAlreadyFinalInvoiced}
                 onClick={handleSaveDraft}
                 icon={<Clock size={15} />}
               >
@@ -551,7 +564,7 @@ export function CreateInvoiceModal({
               <Button
                 variant="primary"
                 size="md"
-                disabled={(!primaryDoc && !primaryFile) || !supplierInvoiceNo.trim() || isSubmitting}
+                disabled={(!primaryDoc && !primaryFile) || !supplierInvoiceNo.trim() || isSubmitting || isAlreadyFinalInvoiced}
                 isLoading={isSubmitting}
                 icon={<Send size={15} />}
                 onClick={handleConfirmSubmit}
@@ -563,6 +576,12 @@ export function CreateInvoiceModal({
         }
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {isAlreadyFinalInvoiced && (
+            <Alert type="warning" title="Certificate Already Invoiced">
+              This certificate has already been invoiced under reference {certificate?.invoiceNumber || 'a commercial invoice'}. A certificate cannot be invoiced twice.
+            </Alert>
+          )}
+
           {errorMessage && (
             <Alert type="danger" title="Action Required" onClose={() => setErrorMessage(null)}>
               {errorMessage}
@@ -941,9 +960,12 @@ export function CreateInvoiceModal({
           onClose={() => setIsPreviewOpen(false)}
           certificate={certificate}
           poSites={poSites}
-          invoiceFile={primaryFile || new File([], primaryDoc?.fileName || 'invoice.pdf')}
-          receiptFile={receiptFile || (receiptDoc ? new File([], receiptDoc.fileName) : null)}
+          invoiceFile={primaryFile}
+          primaryDocStoragePath={primaryDoc?.storagePath}
+          receiptFile={receiptFile}
+          receiptDocStoragePath={receiptDoc?.storagePath}
           supportingFiles={supportingFiles}
+          supportingDocStoragePaths={supportingDocsList.map((d) => ({ fileName: d.fileName, storagePath: d.storagePath }))}
           supplierInvoiceNo={supplierInvoiceNo}
           invoiceDate={invoiceDate}
           invoiceAmount={calcResult.baseAmount}
@@ -954,7 +976,7 @@ export function CreateInvoiceModal({
           isSubmitting={isSubmitting}
           statusStep={statusStep}
           precompiledBytes={cachedPacketBytes}
-          onCompiledBytesReady={(bytes) => setCachedPacketBytes(bytes)}
+          onCompiledBytesReady={(bytes) => setCachedPacketBytes(new Uint8Array(bytes.slice()))}
           onSubmit={handleConfirmSubmit}
         />
       )}

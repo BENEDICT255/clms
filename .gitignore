@@ -46,3 +46,6 @@ Thumbs.db
 # Supabase local artifacts
 .supabase/
 supabase/.temp/
+
+# Scratch files
+scratch/

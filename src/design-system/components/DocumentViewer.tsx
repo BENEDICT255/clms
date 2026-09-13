@@ -22,6 +22,7 @@ import {
   Download,
   Printer,
   AlertCircle,
+  X,
 } from 'lucide-react';
 import { downloadService } from '@/application/services/DownloadService';
 import './DocumentViewer.css';
@@ -67,6 +68,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [renderedPages, setRenderedPages] = useState<number[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   // Cached raw bytes for download/print
   const rawBytesRef = useRef<Uint8Array | null>(null);
@@ -96,15 +98,24 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         let docData: Uint8Array;
 
         if (source instanceof Uint8Array) {
-          docData = source;
-          rawBytesRef.current = source;
+          if (source.buffer.byteLength === 0) {
+            throw new Error('Source document buffer is empty or detached.');
+          }
+          docData = new Uint8Array(source.slice());
+          rawBytesRef.current = new Uint8Array(docData.slice());
         } else if (source instanceof ArrayBuffer) {
-          docData = new Uint8Array(source);
-          rawBytesRef.current = docData;
+          if (source.byteLength === 0) {
+            throw new Error('Source document buffer is empty or detached.');
+          }
+          docData = new Uint8Array(source.slice(0));
+          rawBytesRef.current = new Uint8Array(docData.slice());
         } else if (source instanceof Blob) {
           const ab = await source.arrayBuffer();
+          if (ab.byteLength === 0) {
+            throw new Error('Source document blob is empty.');
+          }
           docData = new Uint8Array(ab);
-          rawBytesRef.current = docData;
+          rawBytesRef.current = new Uint8Array(docData.slice());
         } else if (typeof source === 'string') {
           // Fetch from URL
           const res = await fetch(source);
@@ -112,14 +123,21 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             throw new Error(`Failed to load document: HTTP ${res.status}`);
           }
           const ab = await res.arrayBuffer();
+          if (ab.byteLength === 0) {
+            throw new Error('Source document fetched from URL is empty.');
+          }
           docData = new Uint8Array(ab);
-          rawBytesRef.current = docData;
+          rawBytesRef.current = new Uint8Array(docData.slice());
         } else {
           throw new Error('Unsupported document source type.');
         }
 
+        // Always clone a dedicated slice for the Web Worker so that worker.postMessage
+        // transferable object transfer does NOT detach docData or rawBytesRef!
+        const workerData = new Uint8Array(docData.slice());
+
         loadingTask = pdfjsLib.getDocument({
-          data: docData,
+          data: workerData,
           useSystemFonts: true,
         });
         const loadedPdf = await loadingTask.promise;
@@ -226,15 +244,39 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const handleZoomOut = () => setScale((prev) => Math.max(prev - 0.2, 0.5));
   const handleResetZoom = () => setScale(initialScale);
 
-  const handleFitWidth = () => {
-    if (!viewportRef.current) return;
-    const availableWidth = viewportRef.current.clientWidth - 48; // padding
-    if (availableWidth > 300) {
-      // Standard A4 width is 595pt
-      const fitScale = availableWidth / 595.28;
-      setScale(Math.max(0.5, Math.min(fitScale, 2.0)));
-    }
+  // Fullscreen / Expand controls — preserves default / current scale without auto-zooming
+  const toggleFullscreen = () => {
+    setIsFullscreen((prev) => !prev);
   };
+
+  // Intercept Escape key in capture phase so full screen exits cleanly without closing parent modal
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setIsFullscreen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
+  }, [isFullscreen]);
+
+  // Lock body scroll while in fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isFullscreen]);
 
   // Download handler
   const handleDownload = () => {
@@ -243,8 +285,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       return;
     }
 
-    if (rawBytesRef.current) {
-      const blob = new Blob([rawBytesRef.current.buffer as ArrayBuffer], { type: 'application/pdf' });
+    if (rawBytesRef.current && rawBytesRef.current.byteLength > 0) {
+      const clone = new Uint8Array(rawBytesRef.current.slice());
+      const blob = new Blob([clone.buffer as ArrayBuffer], { type: 'application/pdf' });
       downloadService.downloadBlob(blob, fileName);
     }
   };
@@ -257,9 +300,23 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`clms-document-viewer ${className}`}
-      style={{ height }}
+      className={`clms-document-viewer ${isFullscreen ? 'clms-document-viewer--fullscreen' : ''} ${className}`}
+      style={{ height: isFullscreen ? '100vh' : height }}
     >
+      {/* Floating Top-Right Exit Toggle when in Fullscreen */}
+      {isFullscreen && (
+        <button
+          type="button"
+          className="clms-document-viewer__fullscreen-toggle"
+          onClick={() => setIsFullscreen(false)}
+          title="Click or press Escape to go to normal view"
+        >
+          <kbd>ESC</kbd>
+          <span>Press Escape to go to normal view</span>
+          <X size={13} style={{ marginLeft: 2, opacity: 0.8 }} />
+        </button>
+      )}
+
       {/* Viewer Toolbar */}
       {showToolbar && (
         <div className="clms-document-viewer__toolbar">
@@ -298,11 +355,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </button>
             <button
               type="button"
-              className="clms-document-viewer__btn"
-              onClick={handleFitWidth}
-              title="Fit to Width"
+              className={`clms-document-viewer__btn ${isFullscreen ? 'clms-document-viewer__btn--active' : ''}`}
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit Full Screen (Esc)' : 'Expand to Full Screen'}
             >
-              <Maximize2 size={13} /> Fit Width
+              {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              {isFullscreen ? 'Normal View' : 'Expand'}
             </button>
             <button
               type="button"

@@ -548,11 +548,16 @@ export class InvoiceRepository {
       let arrayBuffer: ArrayBuffer;
       let blobOrFile: Blob;
       if (params.file instanceof Uint8Array) {
-        arrayBuffer = params.file.buffer as ArrayBuffer;
-        blobOrFile = new Blob([arrayBuffer], { type: 'application/pdf' });
+        const clone = new Uint8Array(params.file.slice());
+        arrayBuffer = clone.buffer as ArrayBuffer;
+        blobOrFile = new Blob([clone.buffer as ArrayBuffer], { type: 'application/pdf' });
       } else {
         arrayBuffer = await params.file.arrayBuffer();
         blobOrFile = params.file;
+      }
+
+      if (arrayBuffer.byteLength === 0) {
+        return { success: false, error: 'Cannot upload empty or detached submission packet (0 bytes).' };
       }
 
       const { error: uploadErr } = await supabase.storage
@@ -634,27 +639,28 @@ export class InvoiceRepository {
     createdAt: string;
   } | null> {
     try {
-      const { data, error } = await supabase
+      // 1. Look for authentic INVOICE_PACKET first
+      const { data: packetData, error } = await supabase
         .from('commercial_documents')
         .select('*')
         .eq('entity_type', 'INVOICE')
         .eq('entity_id', invoiceId)
-        .in('document_type', ['INVOICE_PACKET', 'SUPPLIER_INVOICE'])
+        .eq('document_type', 'INVOICE_PACKET')
+        .order('version', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (error || !data) return null;
+      if (error || !packetData) return null;
 
-      const signedUrl = await documentStorageService.getSignedUrl(data.storage_path, 3600);
-
+      const signedUrl = await documentStorageService.getSignedUrl(packetData.storage_path, 3600);
       return {
-        id: data.id,
-        fileName: data.file_name,
-        fileSize: Number(data.file_size),
-        storagePath: data.storage_path,
+        id: packetData.id,
+        fileName: packetData.file_name,
+        fileSize: packetData.file_size,
+        storagePath: packetData.storage_path,
         ...(signedUrl ? { url: signedUrl } : {}),
-        createdAt: data.created_at,
+        createdAt: packetData.created_at,
       };
     } catch {
       return null;

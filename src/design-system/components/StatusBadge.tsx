@@ -23,9 +23,9 @@ export type StatusType =
 
 interface StatusBadgeProps {
   status: StatusType | string;
-  label?: string;
-  size?: 'sm' | 'md';
-  className?: string;
+  label?: string | undefined;
+  size?: 'sm' | 'md' | undefined;
+  className?: string | undefined;
 }
 
 export function StatusBadge({ status, label, size = 'md', className = '' }: StatusBadgeProps) {

@@ -61,7 +61,13 @@ export function CertificatesPage() {
       header: 'Status',
       align: 'center',
       width: '140px',
-      cell: (row) => <StatusBadge status={row.status} size="sm" />,
+      cell: (row) => (
+        <StatusBadge
+          status={row.isInvoiced ? 'INVOICED' : row.status}
+          label={row.isInvoiced ? 'INVOICED' : undefined}
+          size="sm"
+        />
+      ),
     },
     {
       header: 'Created At',
