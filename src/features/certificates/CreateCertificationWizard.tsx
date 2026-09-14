@@ -27,7 +27,10 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowLeft,
+  Eye,
+  FileText,
 } from 'lucide-react';
+import { PreSubmitCertificatePreviewModal } from './PreSubmitCertificatePreviewModal';
 
 interface CreateCertificationWizardProps {
   isOpen: boolean;
@@ -54,6 +57,7 @@ export function CreateCertificationWizard({
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // Load available commercial records
   useEffect(() => {
@@ -281,15 +285,25 @@ export function CreateCertificationWizard({
                 Next Step
               </Button>
             ) : (
-              <Button
-                variant="primary"
-                icon={<Award size={16} />}
-                isLoading={isSubmitting}
-                disabled={!calculationResult.isValid}
-                onClick={handleSubmitCertificate}
-              >
-                Submit for Approval
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  icon={<Eye size={16} />}
+                  disabled={!calculationResult.isValid || !activePO}
+                  onClick={() => setIsPreviewOpen(true)}
+                >
+                  Preview Certificate
+                </Button>
+                <Button
+                  variant="primary"
+                  icon={<Award size={16} />}
+                  isLoading={isSubmitting}
+                  disabled={!calculationResult.isValid}
+                  onClick={handleSubmitCertificate}
+                >
+                  Submit for Approval
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -734,6 +748,38 @@ export function CreateCertificationWizard({
               </div>
             </div>
 
+            {/* Pre-Submission Certificate Document Preview Callout */}
+            <div
+              className="border-hairline"
+              style={{
+                padding: 'var(--space-3) var(--space-4)',
+                borderRadius: 'var(--radius-xs)',
+                backgroundColor: 'var(--color-bg-secondary)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <FileText size={16} color="var(--color-brand-primary)" />
+                <div>
+                  <strong style={{ fontSize: 'var(--font-size-xs)' }}>Authentic 9-Page Certificate Document</strong>
+                  <div style={{ fontSize: 'var(--font-size-2xs)', color: 'var(--color-text-secondary)' }}>
+                    Inspect the compiled {certType} document and linked PO contractual schedule before submitting
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Eye size={14} />}
+                disabled={!calculationResult.isValid || !activePO}
+                onClick={() => setIsPreviewOpen(true)}
+              >
+                Preview Document
+              </Button>
+            </div>
+
             <div>
               <label style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', display: 'block', marginBottom: 'var(--space-1)' }}>
                 Commercial Remarks / Notes:
@@ -753,6 +799,29 @@ export function CreateCertificationWizard({
               />
             </div>
           </div>
+        )}
+
+        {activePO && isPreviewOpen && (
+          <PreSubmitCertificatePreviewModal
+            isOpen={isPreviewOpen}
+            onClose={() => setIsPreviewOpen(false)}
+            certType={certType}
+            poId={activePO.poId}
+            poNumber={activePO.poNumber}
+            poAuthorizedAmount={eligibleSitesForPO.reduce((sum, s) => sum + (s.authorizedValue || 0), 0)}
+            supplierId={eligibleSitesForPO[0]?.supplierId || ''}
+            supplierName={activePO.supplierName}
+            projectName={eligibleSitesForPO[0]?.projectName || 'Commercial Scope'}
+            currency={activePO.currency}
+            totalCertifiedAmount={calculationResult.totalCertifiedAmount}
+            siteItems={calculationResult.siteItems}
+            notes={notes}
+            isSubmitting={isSubmitting}
+            onSubmit={() => {
+              setIsPreviewOpen(false);
+              handleSubmitCertificate();
+            }}
+          />
         )}
       </div>
     </Modal>

@@ -78,9 +78,22 @@ export function CertificatePreviewModal({
   if (!certificate) return null;
 
   const isSupplier = Boolean(user?.supplierId);
-  const canApproveLead = can('certificate.approve.lead');
-  const canApproveHop = can('certificate.approve.hop');
-  const canIssue = can('certificate.issue');
+  const canApproveLead =
+    can('certificate.approve.lead') ||
+    user?.roles?.includes('PROJECT_LEAD') ||
+    user?.roles?.includes('HEAD_OF_PROJECTS') ||
+    user?.roles?.includes('SYSTEM_ADMIN');
+  const canApproveHop =
+    can('certificate.approve.hop') ||
+    user?.roles?.includes('HEAD_OF_PROJECTS') ||
+    user?.roles?.includes('SYSTEM_ADMIN');
+  const canIssue =
+    can('certificate.issue') ||
+    can('certificate.approve.lead') ||
+    can('certificate.approve.hop') ||
+    user?.roles?.includes('PROJECT_LEAD') ||
+    user?.roles?.includes('HEAD_OF_PROJECTS') ||
+    user?.roles?.includes('SYSTEM_ADMIN');
 
   const handleDownloadPdf = async () => {
     setIsDownloadingPdf(true);
