@@ -101,6 +101,7 @@ export interface CommercialPackageRecord {
   confirmedAt?: string;
   createdAt: string;
   updatedAt: string;
+  poId?: string;
   poNumber?: string;
   supplierName?: string;
   authorizedAmount?: number;

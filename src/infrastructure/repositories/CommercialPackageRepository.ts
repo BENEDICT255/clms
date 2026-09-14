@@ -95,6 +95,7 @@ export class CommercialPackageRepository {
         updated_at,
         projects ( name ),
         purchase_orders (
+          id,
           po_number,
           currency,
           authorized_amount,
@@ -118,11 +119,13 @@ export class CommercialPackageRepository {
         updated_at: string;
         projects?: { name: string };
         purchase_orders?: {
+          id?: string;
           po_number: string;
           currency: string;
           authorized_amount: number;
           suppliers?: { name: string };
         } | Array<{
+          id?: string;
           po_number: string;
           currency: string;
           authorized_amount: number;
@@ -138,12 +141,143 @@ export class CommercialPackageRepository {
         status: row.status,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        poId: po?.id || '',
         poNumber: po?.po_number || '—',
         supplierName: po?.suppliers?.name || '—',
         authorizedAmount: po?.authorized_amount || 0,
         currency: po?.currency || 'TZS',
       };
     });
+  }
+
+  public async getPackageDetails(packageId: string): Promise<{
+    packageRef: string;
+    projectName: string;
+    supplierName: string;
+    poNumber: string;
+    poId: string;
+    authorizedAmount: number;
+    currency: string;
+    status: PackageStatus;
+    createdAt: string;
+    templateVersion?: string;
+    sites: Array<{
+      id: string;
+      siteIdExt: string;
+      siteName: string;
+      region: string;
+      authorizedAmount: number;
+      scopeDescription?: string;
+    }>;
+    documents: Array<{
+      id: string;
+      documentType: string;
+      fileName: string;
+      fileSize: number;
+      mimeType: string;
+      storagePath: string;
+    }>;
+  } | null> {
+    try {
+      const { data: pkg, error: pkgErr } = await supabase
+        .from('commercial_packages')
+        .select(`
+          id,
+          package_ref,
+          status,
+          created_at,
+          projects ( name ),
+          purchase_orders (
+            id,
+            po_number,
+            authorized_amount,
+            currency,
+            suppliers ( id, name )
+          ),
+          boqs (
+            template_version,
+            total_amount
+          )
+        `)
+        .eq('id', packageId)
+        .single();
+
+      if (pkgErr || !pkg) return null;
+
+      const po = Array.isArray(pkg.purchase_orders) ? pkg.purchase_orders[0] : pkg.purchase_orders;
+      const boq = Array.isArray(pkg.boqs) ? pkg.boqs[0] : pkg.boqs;
+      const project = Array.isArray(pkg.projects) ? pkg.projects[0] : pkg.projects;
+      const supplier = Array.isArray(po?.suppliers) ? po?.suppliers[0] : po?.suppliers;
+
+      let sitesList: Array<{
+        id: string;
+        siteIdExt: string;
+        siteName: string;
+        region: string;
+        authorizedAmount: number;
+        scopeDescription?: string;
+      }> = [];
+
+      if (po?.id) {
+        const { data: poSitesData } = await supabase
+          .from('po_sites')
+          .select(`
+            id,
+            authorized_amount,
+            scope_description,
+            sites ( id, site_id_ext, site_name, region )
+          `)
+          .eq('po_id', po.id)
+          .order('authorized_amount', { ascending: false });
+
+        sitesList = (poSitesData || []).map((ps: any) => {
+          const s = Array.isArray(ps.sites) ? ps.sites[0] : ps.sites;
+          return {
+            id: s?.id || ps.id,
+            siteIdExt: s?.site_id_ext || '—',
+            siteName: s?.site_name || '—',
+            region: s?.region || '—',
+            authorizedAmount: Number(ps.authorized_amount) || 0,
+            scopeDescription: ps.scope_description || '',
+          };
+        });
+      }
+
+      const entityIds = [packageId];
+      if (po?.id) entityIds.push(po.id);
+
+      const { data: docsData } = await supabase
+        .from('commercial_documents')
+        .select('id, document_type, file_name, file_size, mime_type, storage_path')
+        .in('entity_id', entityIds);
+
+      const documents = (docsData || []).map((d: any) => ({
+        id: d.id,
+        documentType: d.document_type,
+        fileName: d.file_name,
+        fileSize: Number(d.file_size) || 0,
+        mimeType: d.mime_type,
+        storagePath: d.storage_path,
+      }));
+
+      return {
+        packageRef: pkg.package_ref,
+        projectName: project?.name || '—',
+        supplierName: supplier?.name || '—',
+        poNumber: po?.po_number || '—',
+        poId: po?.id || '',
+        authorizedAmount: Number(po?.authorized_amount) || 0,
+        currency: po?.currency || 'TZS',
+        status: pkg.status as PackageStatus,
+        createdAt: pkg.created_at,
+        templateVersion: boq?.template_version || 'Site Improvement Standard',
+        sites: sitesList,
+        documents,
+      };
+    } catch (err) {
+      console.error('Error in getPackageDetails:', err);
+      return null;
+    }
   }
 
   public async checkDuplicatePO(poNumber: string): Promise<boolean> {
