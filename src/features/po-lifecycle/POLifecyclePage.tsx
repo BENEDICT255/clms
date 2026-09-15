@@ -32,6 +32,7 @@ import {
   PaymentDrawer,
 } from './POLifecycleDrawers';
 import { POLifecycleDocumentModal } from './POLifecycleDocumentModal';
+import { POLifecycleConnectors } from './POLifecycleConnectors';
 import './POLifecycle.css';
 
 export const POLifecyclePage: React.FC = () => {
@@ -46,6 +47,7 @@ export const POLifecyclePage: React.FC = () => {
   const [searchResults, setSearchResults] = useState<POLifecycleSearchItem[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const treeBodyRef = useRef<HTMLDivElement>(null);
 
   // Lineage Tree Data State
   const [treeData, setTreeData] = useState<POLifecycleTreeData | null>(null);
@@ -443,11 +445,15 @@ export const POLifecyclePage: React.FC = () => {
             </div>
 
             {/* Lineage Tree Body */}
-            <div className="clms-po-lifecycle-tree-body">
+            <div className="clms-po-lifecycle-tree-body" ref={treeBodyRef}>
+              {/* Dynamic SVG Connector Lines & Arrowheads */}
+              <POLifecycleConnectors containerRef={treeBodyRef} treeData={treeData} />
+
               {/* Column 1: Anchor Purchase Order Node */}
-              <div style={{ width: '280px', flexShrink: 0 }}>
+              <div style={{ width: '280px', flexShrink: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div
                   className="clms-lifecycle-node"
+                  data-node-id="po"
                   onClick={() => setIsPODrawerOpen(true)}
                   tabIndex={0}
                   role="button"
@@ -483,7 +489,7 @@ export const POLifecyclePage: React.FC = () => {
                   <div className="clms-lifecycle-node__footer">
                     <span>{treeData.summary.siteCount} Sites</span>
                     <span>Issued {treeData.summary.issuedDate}</span>
-                    <span>{treeData.summary.paymentTermsDays}d terms</span>
+                    <span>Payment Terms {treeData.summary.paymentTermsDays} days</span>
                   </div>
                 </div>
               </div>
@@ -501,13 +507,14 @@ export const POLifecyclePage: React.FC = () => {
                       style={{
                         display: 'grid',
                         gridTemplateColumns: '300px 280px 280px',
-                        gap: 'var(--space-6)',
+                        gap: '36px',
                         alignItems: 'center',
                       }}
                     >
                       {/* Column 2: Certificate Node */}
                       <div
                         className="clms-lifecycle-node"
+                        data-node-id={`cert-${cert.id}`}
                         onClick={() => {
                           setSelectedCertificate(cert);
                           setIsCertDrawerOpen(true);
@@ -530,7 +537,6 @@ export const POLifecyclePage: React.FC = () => {
                               {cert.certificateNumber}
                             </span>
                           </div>
-                          <ChevronRight size={14} className="clms-lifecycle-node__chevron" aria-hidden="true" />
                         </div>
 
                         <div className="clms-lifecycle-node__meta">
@@ -543,146 +549,150 @@ export const POLifecyclePage: React.FC = () => {
 
                         <div className="clms-lifecycle-node__footer">
                           <span>
-                            {cert.status === 'ISSUED' ? `Issued ${cert.issuedDate}` : `● ${cert.status}`}
+                            {cert.status === 'ISSUED'
+                              ? `Issued ${cert.issuedDate} · ${cert.siteCount} Sites`
+                              : `● ${cert.status} · ${cert.siteCount} Sites`}
                           </span>
-                          <span>{cert.siteCount} Sites</span>
                         </div>
                       </div>
 
                       {/* Column 3: Linked Invoice(s) */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                        {cert.invoices.map((inv) => (
-                          <div
-                            key={inv.id}
-                            className={`clms-lifecycle-node ${
-                              inv.isPlaceholder ? 'clms-lifecycle-node--placeholder' : ''
-                            }`}
-                            onClick={() => {
-                              if (!inv.isPlaceholder) {
-                                setSelectedInvoice(inv);
-                                setIsInvoiceDrawerOpen(true);
-                              }
-                            }}
-                            tabIndex={inv.isPlaceholder ? undefined : 0}
-                            role={inv.isPlaceholder ? undefined : 'button'}
-                            onKeyDown={(e) => {
-                              if (!inv.isPlaceholder && (e.key === 'Enter' || e.key === ' ')) {
-                                e.preventDefault();
-                                setSelectedInvoice(inv);
-                                setIsInvoiceDrawerOpen(true);
-                              }
-                            }}
-                            aria-label={inv.isPlaceholder ? 'Awaiting Invoice' : `Invoice ${inv.clmsReference}`}
-                          >
-                            <div className="clms-lifecycle-node__header">
-                              <div className="clms-lifecycle-node__header-left">
-                                <FileText
-                                  size={16}
-                                  className={
-                                    inv.isPlaceholder
-                                      ? 'clms-lifecycle-node__icon--neutral'
-                                      : 'clms-lifecycle-node__icon'
-                                  }
-                                />
-                                <span className="clms-lifecycle-node__ref">
-                                  {inv.clmsReference}
-                                </span>
-                              </div>
-                              {!inv.isPlaceholder && (
-                                <ChevronRight size={14} className="clms-lifecycle-node__chevron" aria-hidden="true" />
-                              )}
-                            </div>
-
-                            {!inv.isPlaceholder ? (
-                              <>
-                                <div className="clms-lifecycle-node__amount tabular-nums">
-                                  {inv.currency} {formatCurrency(inv.amount)}
-                                </div>
-                                <div className="clms-lifecycle-node__footer">
-                                  <span>Submitted {inv.submittedDate}</span>
-                                  <span style={{ color: 'var(--color-brand-primary)', fontWeight: 'var(--font-weight-medium)' }}>
-                                    {inv.status}
-                                  </span>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="clms-lifecycle-node__meta" style={{ color: 'var(--color-text-tertiary)' }}>
-                                {inv.supplierInvoiceNumber}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Column 4: Linked Payment(s) */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                        {cert.invoices.flatMap((inv) =>
-                          inv.payments.map((p) => (
+                        {cert.invoices.map((inv) => {
+                          const statusClass = inv.status.toLowerCase().replace(/_/g, '-');
+                          return (
                             <div
-                              key={p.id}
+                              key={inv.id}
+                              data-node-id={`inv-${inv.id}`}
                               className={`clms-lifecycle-node ${
-                                p.isPlaceholder ? 'clms-lifecycle-node--placeholder' : ''
+                                inv.isPlaceholder ? 'clms-lifecycle-node--placeholder' : ''
                               }`}
                               onClick={() => {
-                                if (!p.isPlaceholder) {
-                                  setSelectedPayment(p);
-                                  setIsPaymentDrawerOpen(true);
+                                if (!inv.isPlaceholder) {
+                                  setSelectedInvoice(inv);
+                                  setIsInvoiceDrawerOpen(true);
                                 }
                               }}
-                              tabIndex={p.isPlaceholder ? undefined : 0}
-                              role={p.isPlaceholder ? undefined : 'button'}
+                              tabIndex={inv.isPlaceholder ? undefined : 0}
+                              role={inv.isPlaceholder ? undefined : 'button'}
                               onKeyDown={(e) => {
-                                if (!p.isPlaceholder && (e.key === 'Enter' || e.key === ' ')) {
+                                if (!inv.isPlaceholder && (e.key === 'Enter' || e.key === ' ')) {
                                   e.preventDefault();
-                                  setSelectedPayment(p);
-                                  setIsPaymentDrawerOpen(true);
+                                  setSelectedInvoice(inv);
+                                  setIsInvoiceDrawerOpen(true);
                                 }
                               }}
-                              aria-label={p.isPlaceholder ? p.referenceNumber : `Payment ${p.referenceNumber}`}
+                              aria-label={inv.isPlaceholder ? 'Awaiting Invoice' : `Invoice ${inv.clmsReference}`}
                             >
                               <div className="clms-lifecycle-node__header">
                                 <div className="clms-lifecycle-node__header-left">
-                                  {p.isPlaceholder ? (
-                                    <FileText size={16} className="clms-lifecycle-node__icon--neutral" />
-                                  ) : (
-                                    <CheckCircle2 size={16} className="clms-lifecycle-node__icon--success" />
-                                  )}
+                                  <FileText
+                                    size={16}
+                                    className={
+                                      inv.isPlaceholder
+                                        ? 'clms-lifecycle-node__icon--neutral'
+                                        : 'clms-lifecycle-node__icon'
+                                    }
+                                  />
                                   <span className="clms-lifecycle-node__ref">
-                                    {p.referenceNumber}
+                                    {inv.clmsReference}
                                   </span>
                                 </div>
-                                {!p.isPlaceholder && (
+                                {!inv.isPlaceholder && (
                                   <ChevronRight size={14} className="clms-lifecycle-node__chevron" aria-hidden="true" />
                                 )}
                               </div>
 
-                              {!p.isPlaceholder ? (
+                              {!inv.isPlaceholder ? (
                                 <>
                                   <div className="clms-lifecycle-node__amount tabular-nums">
-                                    {p.currency} {formatCurrency(p.amount)}
+                                    {inv.currency} {formatCurrency(inv.amount)}
                                   </div>
                                   <div className="clms-lifecycle-node__footer">
-                                    <span>{p.paymentDate}</span>
-                                    <span
-                                      style={{
-                                        color:
-                                          p.status === 'Settled'
-                                            ? 'var(--color-status-success-text)'
-                                            : 'var(--color-status-pending-text)',
-                                        fontWeight: 'var(--font-weight-medium)',
-                                      }}
-                                    >
-                                      {p.status}
+                                    <span>Submitted {inv.submittedDate}</span>
+                                    <span className={`clms-lifecycle-pill clms-lifecycle-pill--${statusClass}`}>
+                                      {inv.status === 'SC_APPROVED'
+                                        ? 'Supply Chain'
+                                        : inv.status === 'UNDER_FINANCE_REVIEW' || inv.status === 'Finance'
+                                        ? 'Finance'
+                                        : inv.status}
                                     </span>
                                   </div>
                                 </>
                               ) : (
                                 <div className="clms-lifecycle-node__meta" style={{ color: 'var(--color-text-tertiary)' }}>
-                                  {p.paymentDate}
+                                  {inv.supplierInvoiceNumber}
                                 </div>
                               )}
                             </div>
-                          ))
+                          );
+                        })}
+                      </div>
+
+                      {/* Column 4: Linked Payment(s) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                        {cert.invoices.flatMap((inv) =>
+                          inv.payments.map((p) => {
+                            const pillClass = p.status ? p.status.toLowerCase() : 'neutral';
+                            return (
+                              <div
+                                key={p.id}
+                                data-node-id={`pay-${p.id}`}
+                                className={`clms-lifecycle-node ${
+                                  p.isPlaceholder ? 'clms-lifecycle-node--placeholder' : ''
+                                }`}
+                                onClick={() => {
+                                  if (!p.isPlaceholder) {
+                                    setSelectedPayment(p);
+                                    setIsPaymentDrawerOpen(true);
+                                  }
+                                }}
+                                tabIndex={p.isPlaceholder ? undefined : 0}
+                                role={p.isPlaceholder ? undefined : 'button'}
+                                onKeyDown={(e) => {
+                                  if (!p.isPlaceholder && (e.key === 'Enter' || e.key === ' ')) {
+                                    e.preventDefault();
+                                    setSelectedPayment(p);
+                                    setIsPaymentDrawerOpen(true);
+                                  }
+                                }}
+                                aria-label={p.isPlaceholder ? p.referenceNumber : `Payment ${p.referenceNumber}`}
+                              >
+                                <div className="clms-lifecycle-node__header">
+                                  <div className="clms-lifecycle-node__header-left">
+                                    {p.isPlaceholder ? (
+                                      <FileText size={16} className="clms-lifecycle-node__icon--neutral" />
+                                    ) : (
+                                      <CheckCircle2 size={16} className="clms-lifecycle-node__icon--success" />
+                                    )}
+                                    <span className="clms-lifecycle-node__ref">
+                                      {p.referenceNumber}
+                                    </span>
+                                  </div>
+                                  {!p.isPlaceholder && (
+                                    <span className={`clms-lifecycle-pill clms-lifecycle-pill--${pillClass}`}>
+                                      {p.status}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {!p.isPlaceholder ? (
+                                  <>
+                                    <div className="clms-lifecycle-node__amount tabular-nums">
+                                      {p.currency} {formatCurrency(p.amount)}
+                                    </div>
+                                    <div className="clms-lifecycle-node__meta">
+                                      {p.paymentDate}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="clms-lifecycle-node__meta" style={{ color: 'var(--color-text-tertiary)' }}>
+                                    {p.paymentDate}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
                         )}
                       </div>
                     </div>

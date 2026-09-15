@@ -226,4 +226,36 @@ describe('PO Lifecycle Page & Horizontal Commercial Lineage (Image 2 Fidelity)',
     // Verify Payment Drawer opens
     expect(await screen.findByText('Payment Transaction Details')).toBeDefined();
   });
+
+  it('renders data-node-id attributes on all nodes for SVG tree connector lines', async () => {
+    vi.spyOn(poLifecycleRepository, 'getPOLifecycleData').mockResolvedValue(mockTreeData);
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/po-lifecycle?po=4500015358']}>
+        <Routes>
+          <Route path="/po-lifecycle" element={<POLifecyclePage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('FAC-SI-26-0001')).toBeDefined();
+
+    // Verify PO anchor node has data-node-id="po"
+    const poNode = container.querySelector('[data-node-id="po"]');
+    expect(poNode).not.toBeNull();
+
+    // Verify Certificate nodes have data-node-id
+    const cert1 = container.querySelector('[data-node-id="cert-cert-1"]');
+    const cert2 = container.querySelector('[data-node-id="cert-cert-2"]');
+    expect(cert1).not.toBeNull();
+    expect(cert2).not.toBeNull();
+
+    // Verify Invoice nodes have data-node-id
+    const inv1 = container.querySelector('[data-node-id="inv-inv-1"]');
+    expect(inv1).not.toBeNull();
+
+    // Verify Payment nodes have data-node-id
+    const pay1 = container.querySelector('[data-node-id="pay-pay-1"]');
+    expect(pay1).not.toBeNull();
+  });
 });
