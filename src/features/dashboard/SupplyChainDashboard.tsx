@@ -20,7 +20,7 @@ import { DashboardCard } from './components/DashboardCard';
 import { PipelineBarGroup, PipelineBarItem } from './components/PipelineBarGroup';
 import { AttentionList, AttentionItemData } from './components/AttentionList';
 import { Skeleton } from '@/design-system';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, ChevronDown } from 'lucide-react';
 import './components/Dashboard.css';
 
 export const SupplyChainDashboard: React.FC = () => {
@@ -148,7 +148,10 @@ export const SupplyChainDashboard: React.FC = () => {
           </p>
         </div>
         <div className="clms-role-dashboard__header-right">
-          <span className="clms-role-dashboard__fy-badge">FY 2026</span>
+          <div className="clms-role-dashboard__fy-badge">
+            <span>FY 2026</span>
+            <ChevronDown size={13} aria-hidden="true" />
+          </div>
         </div>
       </div>
 
@@ -167,13 +170,11 @@ export const SupplyChainDashboard: React.FC = () => {
         <DashboardMetricCard
           title="Returned for Correction"
           value={m.returnedForCorrectionCount}
-          accent="danger"
           onClick={() => navigate('/supply-chain?tab=returned')}
         />
         <DashboardMetricCard
           title="Approved to Finance"
           value={m.approvedToFinanceCount}
-          accent="success"
           onClick={() => navigate('/supply-chain?tab=approved')}
         />
       </div>
@@ -181,7 +182,7 @@ export const SupplyChainDashboard: React.FC = () => {
       {/* Middle Section: Invoice Review Pipeline & Requires Your Attention */}
       <div className="clms-role-dashboard__middle-grid">
         <DashboardCard title="Invoice Review Pipeline">
-          <PipelineBarGroup items={formattedPipeline} maxHeight={85} />
+          <PipelineBarGroup items={formattedPipeline} maxHeight={100} />
         </DashboardCard>
 
         <DashboardCard title="Requires Your Attention">

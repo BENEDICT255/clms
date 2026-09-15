@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, ChevronRight, AlertCircle, Clock, CheckCircle2 } from 'lucide-react';
+import { FileText, ChevronRight, CheckCircle2 } from 'lucide-react';
 import './Dashboard.css';
 
 export interface AttentionItemData {
@@ -47,14 +47,14 @@ export const AttentionList: React.FC<AttentionListProps> = ({
         const renderIcon = () => {
           switch (item.iconType) {
             case 'alert':
-              return <AlertCircle size={14} className="clms-attention-item__icon clms-attention-item__icon--danger" />;
+              return <FileText size={16} className="clms-attention-item__icon clms-attention-item__icon--brand" />;
             case 'clock':
-              return <Clock size={14} className="clms-attention-item__icon clms-attention-item__icon--warning" />;
+              return <FileText size={16} className="clms-attention-item__icon clms-attention-item__icon--brand" />;
             case 'check':
-              return <CheckCircle2 size={14} className="clms-attention-item__icon clms-attention-item__icon--success" />;
+              return <CheckCircle2 size={16} className="clms-attention-item__icon clms-attention-item__icon--success" />;
             case 'file':
             default:
-              return <FileText size={14} className="clms-attention-item__icon clms-attention-item__icon--brand" />;
+              return <FileText size={16} className="clms-attention-item__icon clms-attention-item__icon--brand" />;
           }
         };
 
@@ -74,11 +74,11 @@ export const AttentionList: React.FC<AttentionListProps> = ({
             </div>
 
             <div className="clms-attention-item__right">
-              {item.count !== undefined && (
+              {item.count !== undefined && item.count > 0 && (
                 <span className="clms-attention-item__count tabular-nums">{item.count}</span>
               )}
               {isClickable && (
-                <ChevronRight size={14} className="clms-attention-item__chevron" aria-hidden="true" />
+                <ChevronRight size={16} className="clms-attention-item__chevron" aria-hidden="true" />
               )}
             </div>
           </div>

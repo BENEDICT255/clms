@@ -145,6 +145,16 @@ export class SupplierDashboardRepository {
       const readyToInvoiceCount = awaitingInvoiceCount;
       const incompleteDraftsCount = draftCount;
 
+      // Check for partially invoiced POs
+      let partiallyInvoicedPOsCount = 0;
+      for (const po of pos) {
+        const poCerts = certs.filter((c) => c.po_id === po.id && c.status === 'ISSUED');
+        const poInvoicedCerts = poCerts.filter((c) => invoicedCertIds.has(c.id));
+        if (poInvoicedCerts.length > 0 && poInvoicedCerts.length < poCerts.length) {
+          partiallyInvoicedPOsCount++;
+        }
+      }
+
       const attentionItems: SupplierAttentionItem[] = [
         {
           id: 'ready-to-invoice',
@@ -165,6 +175,15 @@ export class SupplierDashboardRepository {
           type: 'draft_incomplete',
         },
       ];
+
+      if (partiallyInvoicedPOsCount > 0) {
+        attentionItems.push({
+          id: 'partially-invoiced-pos',
+          label: `${partiallyInvoicedPOsCount} PO${partiallyInvoicedPOsCount === 1 ? '' : 's'} partially invoiced`,
+          count: partiallyInvoicedPOsCount,
+          type: 'partially_invoiced',
+        });
+      }
 
       // Certificates Ready to Invoice table records
       const readyCertificates: CertificateReadyToInvoiceItem[] = awaitingInvoiceCerts.slice(0, 5).map((c) => {

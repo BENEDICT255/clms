@@ -21,7 +21,7 @@ import { DashboardCard } from './components/DashboardCard';
 import { PipelineBarGroup, PipelineBarItem } from './components/PipelineBarGroup';
 import { AttentionList, AttentionItemData } from './components/AttentionList';
 import { Skeleton } from '@/design-system';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, ChevronDown } from 'lucide-react';
 import './components/Dashboard.css';
 
 export const SupplierDashboard: React.FC = () => {
@@ -164,7 +164,10 @@ export const SupplierDashboard: React.FC = () => {
           </p>
         </div>
         <div className="clms-role-dashboard__header-right">
-          <span className="clms-role-dashboard__fy-badge">FY 2026</span>
+          <div className="clms-role-dashboard__fy-badge">
+            <span>FY 2026</span>
+            <ChevronDown size={13} aria-hidden="true" />
+          </div>
         </div>
       </div>
 
@@ -195,7 +198,7 @@ export const SupplierDashboard: React.FC = () => {
       {/* Middle Section: Invoice Pipeline & Requires Your Attention */}
       <div className="clms-role-dashboard__middle-grid">
         <DashboardCard title="Invoice Pipeline">
-          <PipelineBarGroup items={formattedPipeline} maxHeight={85} />
+          <PipelineBarGroup items={formattedPipeline} maxHeight={100} />
         </DashboardCard>
 
         <DashboardCard title="Requires Your Attention">
