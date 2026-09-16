@@ -48,6 +48,7 @@ export interface POLifecyclePaymentNode {
   currency: string;
   paymentDate: string;
   status: 'Partial' | 'Settled' | 'Pending';
+  fundingSource?: string;
   notes?: string;
   paymentMethod?: string;
   invoiceId: string;
@@ -276,8 +277,7 @@ export class POLifecycleRepository {
               payment_date,
               amount,
               currency,
-              notes,
-              payment_method,
+              funding_source,
               created_at
             )
           `)
@@ -362,8 +362,7 @@ export class POLifecycleRepository {
                       })
                     : '—',
                   status: isFull ? 'Settled' : 'Partial',
-                  notes: p.notes,
-                  paymentMethod: p.payment_method,
+                  fundingSource: p.funding_source,
                   invoiceId: inv.id,
                 };
               });

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -26,16 +27,36 @@ interface SidebarProps {
 export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const { can, user } = useAuth();
   const isSupplier = Boolean(user?.supplierId);
+  const [isHovered, setIsHovered] = useState(false);
+
+  // Appears expanded if either permanently pinned open OR temporarily hovered while collapsed
+  const isExpanded = !isCollapsed || isHovered;
+
+  const handleMouseEnter = () => {
+    if (isCollapsed) {
+      setIsHovered(true);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setIsHovered(false);
+  };
 
   return (
-    <aside className={`clms-sidebar ${isCollapsed ? 'clms-sidebar--collapsed' : ''} border-hairline`}>
+    <aside
+      className={`clms-sidebar ${isCollapsed ? 'clms-sidebar--collapsed' : ''} ${
+        isCollapsed && isHovered ? 'clms-sidebar--hover-expanded' : ''
+      } border-hairline`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       {/* Brand Header */}
       <div className="clms-sidebar__header border-hairline">
         <div className="clms-sidebar__brand">
           <div className="clms-sidebar__brand-logo" aria-hidden="true">
             <span className="clms-sidebar__brand-mark">HT</span>
           </div>
-          {!isCollapsed && (
+          {isExpanded && (
             <div className="clms-sidebar__brand-text">
               <span className="clms-sidebar__brand-name">CLMS</span>
               <span className="clms-sidebar__brand-tagline">Helios Towers</span>
@@ -56,7 +77,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
       <nav className="clms-sidebar__nav" aria-label="Main Navigation">
         {/* Core Commercial Navigation */}
         <div className="clms-sidebar__group">
-          {!isCollapsed && <span className="clms-sidebar__group-title">Commercial Lifecycle</span>}
+          {isExpanded && <span className="clms-sidebar__group-title">Commercial Lifecycle</span>}
           <ul className="clms-sidebar__menu">
             <li>
               <NavLink
@@ -65,10 +86,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 className={({ isActive }) =>
                   `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                 }
-                title={isCollapsed ? 'Overview' : undefined}
+                title={!isExpanded ? 'Overview' : undefined}
               >
                 <LayoutDashboard size={18} className="clms-sidebar__link-icon" />
-                {!isCollapsed && <span>Overview</span>}
+                {isExpanded && <span>Overview</span>}
               </NavLink>
             </li>
             {can('explorer.view') && (
@@ -78,10 +99,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   className={({ isActive }) =>
                     `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                   }
-                  title={isCollapsed ? 'Commercial Explorer' : undefined}
+                  title={!isExpanded ? 'Commercial Explorer' : undefined}
                 >
                   <Compass size={18} className="clms-sidebar__link-icon" />
-                  {!isCollapsed && <span>Commercial Explorer</span>}
+                  {isExpanded && <span>Commercial Explorer</span>}
                 </NavLink>
               </li>
             )}
@@ -92,24 +113,24 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   className={({ isActive }) =>
                     `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                   }
-                  title={isCollapsed ? 'Commercial Packages' : undefined}
+                  title={!isExpanded ? 'Commercial Packages' : undefined}
                 >
                   <FileSpreadsheet size={18} className="clms-sidebar__link-icon" />
-                  {!isCollapsed && <span>Commercial Packages</span>}
+                  {isExpanded && <span>Commercial Packages</span>}
                 </NavLink>
               </li>
             )}
-            {can('certificate.create') && (
+            {!isSupplier && (
               <li>
                 <NavLink
                   to="/certificates"
                   className={({ isActive }) =>
                     `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                   }
-                  title={isCollapsed ? 'Certificates' : undefined}
+                  title={!isExpanded ? 'Certificates' : undefined}
                 >
                   <Award size={18} className="clms-sidebar__link-icon" />
-                  {!isCollapsed && <span>Certificates</span>}
+                  {isExpanded && <span>Certificates</span>}
                 </NavLink>
               </li>
             )}
@@ -119,7 +140,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         {/* Supplier Specific Portal */}
         {(isSupplier || can('invoice.create')) && (
           <div className="clms-sidebar__group">
-            {!isCollapsed && <span className="clms-sidebar__group-title">Supplier Portal</span>}
+            {isExpanded && <span className="clms-sidebar__group-title">Supplier Portal</span>}
             <ul className="clms-sidebar__menu">
               <li>
                 <NavLink
@@ -127,10 +148,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   className={({ isActive }) =>
                     `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                   }
-                  title={isCollapsed ? 'My Certificates' : undefined}
+                  title={!isExpanded ? 'My Certificates' : undefined}
                 >
                   <Award size={18} className="clms-sidebar__link-icon" />
-                  {!isCollapsed && <span>My Certificates</span>}
+                  {isExpanded && <span>My Certificates</span>}
                 </NavLink>
               </li>
               <li>
@@ -139,10 +160,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   className={({ isActive }) =>
                     `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                   }
-                  title={isCollapsed ? 'Invoices' : undefined}
+                  title={!isExpanded ? 'Invoices' : undefined}
                 >
                   <FileText size={18} className="clms-sidebar__link-icon" />
-                  {!isCollapsed && <span>Invoices</span>}
+                  {isExpanded && <span>Invoices</span>}
                 </NavLink>
               </li>
             </ul>
@@ -152,7 +173,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         {/* Verification & Finance */}
         {(can('invoice.review.sc') || can('finance.process') || can('report.view.executive')) && (
           <div className="clms-sidebar__group">
-            {!isCollapsed && <span className="clms-sidebar__group-title">Control & Finance</span>}
+            {isExpanded && <span className="clms-sidebar__group-title">Control & Finance</span>}
             <ul className="clms-sidebar__menu">
               {can('invoice.review.sc') && (
                 <li>
@@ -161,10 +182,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                     className={({ isActive }) =>
                       `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                     }
-                    title={isCollapsed ? 'Supply Chain Review' : undefined}
+                    title={!isExpanded ? 'Supply Chain Review' : undefined}
                   >
                     <CheckSquare size={18} className="clms-sidebar__link-icon" />
-                    {!isCollapsed && <span>SCM Review</span>}
+                    {isExpanded && <span>SCM Review</span>}
                   </NavLink>
                 </li>
               )}
@@ -175,10 +196,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                     className={({ isActive }) =>
                       `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                     }
-                    title={isCollapsed ? 'Finance & Payments' : undefined}
+                    title={!isExpanded ? 'Finance & Payments' : undefined}
                   >
                     <DollarSign size={18} className="clms-sidebar__link-icon" />
-                    {!isCollapsed && <span>Finance Processing</span>}
+                    {isExpanded && <span>Finance Processing</span>}
                   </NavLink>
                 </li>
               )}
@@ -189,10 +210,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                     className={({ isActive }) =>
                       `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                     }
-                    title={isCollapsed ? 'Executive Management' : undefined}
+                    title={!isExpanded ? 'Executive Management' : undefined}
                   >
                     <BarChart3 size={18} className="clms-sidebar__link-icon" />
-                    {!isCollapsed && <span>Management View</span>}
+                    {isExpanded && <span>Management View</span>}
                   </NavLink>
                 </li>
               )}
@@ -202,7 +223,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
 
         {/* System Administration */}
         <div className="clms-sidebar__group">
-          {!isCollapsed && <span className="clms-sidebar__group-title">System</span>}
+          {isExpanded && <span className="clms-sidebar__group-title">System</span>}
           <ul className="clms-sidebar__menu">
             <li>
               <NavLink
@@ -210,10 +231,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 className={({ isActive }) =>
                   `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                 }
-                title={isCollapsed ? 'Notifications' : undefined}
+                title={!isExpanded ? 'Notifications' : undefined}
               >
                 <Bell size={18} className="clms-sidebar__link-icon" />
-                {!isCollapsed && <span>Notifications</span>}
+                {isExpanded && <span>Notifications</span>}
               </NavLink>
             </li>
             <li>
@@ -222,10 +243,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 className={({ isActive }) =>
                   `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                 }
-                title={isCollapsed ? 'PO Lifecycle' : undefined}
+                title={!isExpanded ? 'PO Lifecycle' : undefined}
               >
                 <Workflow size={18} className="clms-sidebar__link-icon" />
-                {!isCollapsed && <span>PO Lifecycle</span>}
+                {isExpanded && <span>PO Lifecycle</span>}
               </NavLink>
             </li>
             {can('config.manage') && (
@@ -235,10 +256,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   className={({ isActive }) =>
                     `clms-sidebar__link ${isActive ? 'clms-sidebar__link--active' : ''}`
                   }
-                  title={isCollapsed ? 'Administration' : undefined}
+                  title={!isExpanded ? 'Administration' : undefined}
                 >
                   <Settings size={18} className="clms-sidebar__link-icon" />
-                  {!isCollapsed && <span>Admin Console</span>}
+                  {isExpanded && <span>Admin Console</span>}
                 </NavLink>
               </li>
             )}

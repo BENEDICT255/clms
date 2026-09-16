@@ -51,7 +51,7 @@ export function AppRouter() {
         <Route
           path="certificates"
           element={
-            <ProtectedRoute requiredCapability="certificate.create">
+            <ProtectedRoute>
               <CertificatesPage />
             </ProtectedRoute>
           }
